@@ -8,10 +8,11 @@ struct TimelineView: View {
     /// Which week page we're on, as an offset from "this week" (0 = current week)
     @State private var currentWeekOffset: Int = 0
     
-    /// Only keep a small window of pages loaded for performance
-    private var weekRange: ClosedRange<Int> {
-        (currentWeekOffset - 4)...(currentWeekOffset + 4)
-    }
+    /// Shared reveal state so all pages match (Point 3)
+    @State private var revealProgress: CGFloat = 0
+    
+    // Fixed range — never changes, so TabView pages are stable (Point 1)
+    private let weekRange = -52...52
     
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
     let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
@@ -20,12 +21,13 @@ struct TimelineView: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             TabView(selection: $currentWeekOffset) {
-                ForEach(Array(weekRange.lowerBound...weekRange.upperBound), id: \.self) { offset in
+                ForEach(weekRange, id: \.self) { offset in
                     WeekPageView(
                         vm: vm,
                         weekOffset: offset,
                         showingAdd: $showingAdd,
-                        editingTask: $editingTask
+                        editingTask: $editingTask,
+                        revealProgress: $revealProgress
                     )
                     .tag(offset)
                 }
@@ -39,18 +41,14 @@ struct TimelineView: View {
                     let currentWeekday = vm.calendar.component(.weekday, from: vm.selectedDate)
                     let wdOffset = (currentWeekday + 5) % 7
                     if let newDate = vm.calendar.date(byAdding: .day, value: wdOffset, to: newMonday) {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            vm.selectedDate = newDate
-                        }
+                        vm.selectedDate = newDate
                     } else {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            vm.selectedDate = newMonday
-                        }
+                        vm.selectedDate = newMonday
                     }
                 }
             }
             
-            // "+" BUTTON — always on top
+            // "+" BUTTON
             Button(action: { showingAdd = true }) {
                 Image(systemName: "plus")
                     .font(.title2.weight(.bold))
@@ -81,7 +79,8 @@ struct WeekPageView: View {
     @Binding var showingAdd: Bool
     @Binding var editingTask: TaskItem?
     
-    @State private var revealProgress: CGFloat = 0
+    /// Shared from parent — all pages read/write the same value (Point 3)
+    @Binding var revealProgress: CGFloat
     
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
     let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
@@ -107,24 +106,24 @@ struct WeekPageView: View {
         return vm.calendar.isDate(selectedMonday, inSameDayAs: pageMonday)
     }
     
+    /// Tracks whether the current drag is vertical (reveal) or should be ignored (horizontal = page swipe)
+    @GestureState private var isDraggingVertically = false
+    
     var body: some View {
         VStack(spacing: 0) {
             
             // ═══════════════════════════════════
-            // HEADER — only shown on current page to avoid duplicate headers during swipe
+            // HEADER
             // ═══════════════════════════════════
             if isCurrentPage {
                 headerView
-                    .transition(.opacity.combined(with: .move(edge: .top)))
             } else {
-                // Show the week's month/year for non-active pages
                 headerViewForPage
-                    .transition(.opacity)
             }
             
             // ═══════════════════════════════════
-            // CALENDAR STRIP (fixed 7-day, Mon→Sun)
-            // ═══════════════════════════════════
+            // CALENDAR STRIP
+            // ��══════════════════════════════════
             HorizontalCalendarView(
                 selectedDate: $vm.selectedDate,
                 vm: vm,
@@ -148,6 +147,7 @@ struct WeekPageView: View {
                         .animation(.easeOut(duration: 0.2), value: revealProgress > 0.05)
                     
                     VStack(spacing: 0) {
+                        // Drag handle
                         Capsule()
                             .fill(Color.gray.opacity(0.5))
                             .frame(width: 40, height: 5)
@@ -170,14 +170,24 @@ struct WeekPageView: View {
                         radius: 20, y: -5
                     )
                     .offset(y: currentOffset)
-                    .gesture(
-                        DragGesture(minimumDistance: 8)
+                    // Use simultaneousGesture so TabView can still detect horizontal swipes (Point 2)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 12)
                             .onChanged { value in
+                                // Only handle vertical drags; let horizontal pass through to TabView
+                                let h = abs(value.translation.height)
+                                let w = abs(value.translation.width)
+                                guard h > w * 1.2 else { return } // Must be predominantly vertical
+                                
                                 let delta = value.translation.height
                                 let newProgress = revealProgress + delta / maxOffset
                                 revealProgress = min(1, max(0, newProgress))
                             }
                             .onEnded { value in
+                                let h = abs(value.translation.height)
+                                let w = abs(value.translation.width)
+                                guard h > w * 1.2 else { return }
+                                
                                 let velocity = value.predictedEndTranslation.height
                                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                     if value.translation.height > 80 || velocity > 200 {
@@ -228,7 +238,7 @@ struct WeekPageView: View {
         .animation(.easeInOut(duration: 0.25), value: isRevealed)
     }
     
-    // MARK: - Header for Non-Active Pages (shows that page's month)
+    // MARK: - Header for Non-Active Pages
     private var headerViewForPage: some View {
         let pageDate = weekDates.first ?? Date()
         return HStack(alignment: .bottom, spacing: 6) {
