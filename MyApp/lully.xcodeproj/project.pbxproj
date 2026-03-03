@@ -15,6 +15,8 @@
 		7585967A2F5439680001F05D /* DayScheduleViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7585966F2F5435B10001F05D /* DayScheduleViewModel.swift */; };
 		7585967C2F5439710001F05D /* TaskItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7585966D2F54359B0001F05D /* TaskItem.swift */; };
 		7585967E2F5440390001F05D /* HorizontalCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7585967D2F5440330001F05D /* HorizontalCalendarView.swift */; };
+		758596802F56F9970001F05D /* AgendaListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7585967F2F56F98F0001F05D /* AgendaListView.swift */; };
+		758596822F56F9AD0001F05D /* WeekOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 758596812F56F99F0001F05D /* WeekOverviewView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +29,8 @@
 		758596722F5435D90001F05D /* AddEditTaskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddEditTaskView.swift; sourceTree = "<group>"; };
 		758596732F5435E50001F05D /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
 		7585967D2F5440330001F05D /* HorizontalCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HorizontalCalendarView.swift; sourceTree = "<group>"; };
+		7585967F2F56F98F0001F05D /* AgendaListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgendaListView.swift; sourceTree = "<group>"; };
+		758596812F56F99F0001F05D /* WeekOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekOverviewView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -87,6 +91,8 @@
 		7585966B2F5435860001F05D /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				758596812F56F99F0001F05D /* WeekOverviewView.swift */,
+				7585967F2F56F98F0001F05D /* AgendaListView.swift */,
 				7585967D2F5440330001F05D /* HorizontalCalendarView.swift */,
 				758596732F5435E50001F05D /* TimelineView.swift */,
 				758596722F5435D90001F05D /* AddEditTaskView.swift */,
@@ -178,6 +184,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				758596822F56F9AD0001F05D /* WeekOverviewView.swift in Sources */,
 				758596762F5439550001F05D /* TaskStore.swift in Sources */,
 				758596752F54394D0001F05D /* TimelineView.swift in Sources */,
 				7585967A2F5439680001F05D /* DayScheduleViewModel.swift in Sources */,
@@ -185,6 +192,7 @@
 				7585967E2F5440390001F05D /* HorizontalCalendarView.swift in Sources */,
 				758596782F5439600001F05D /* TaskBlockView.swift in Sources */,
 				758596772F54395B0001F05D /* AddEditTaskView.swift in Sources */,
+				758596802F56F9970001F05D /* AgendaListView.swift in Sources */,
 				758596792F5439640001F05D /* TimeColumnView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
