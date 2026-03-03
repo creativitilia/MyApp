@@ -1,144 +1,111 @@
 import SwiftUI
 
-/// The "back page" week overview with adaptive hour labels.
-/// - Scans all 7 days to find the earliest task start and latest task end
-/// - Only shows hours in that range
-/// - No tasks = completely empty (no hour labels, no lines)
 struct WeekOverviewView: View {
     @ObservedObject var vm: DayScheduleViewModel
     let weekDates: [Date]
     
-    private let miniPillSize: CGFloat = 40
-    private let hourLabelWidth: CGFloat = 44
-    private let minPixelsPerHour: CGFloat = 60
-    private let verticalPadding: CGFloat = 30
+    private let miniPillSize: CGFloat = 36
+    private let hourLabelWidth: CGFloat = 40
+    private let minPixelsPerHour: CGFloat = 80
+    private let verticalPadding: CGFloat = 20
+    private let calendarStripHPadding: CGFloat = 4  // must match HorizontalCalendarView .padding(.horizontal, 4)
     
-    // MARK: - Computed: Hour Range from task data
+    // MARK: - Computed
     
     private var allWeekTasks: [TaskItem] {
         weekDates.flatMap { vm.tasksFor(date: $0) }
     }
     
+    private var hasAnyTasks: Bool { !allWeekTasks.isEmpty }
+    
     private var earliestHour: Int? {
-        guard let earliest = allWeekTasks.min(by: { $0.startTime < $1.startTime }) else { return nil }
-        return vm.calendar.component(.hour, from: earliest.startTime)
+        guard let e = allWeekTasks.min(by: { $0.startTime < $1.startTime }) else { return nil }
+        return vm.calendar.component(.hour, from: e.startTime)
     }
     
     private var latestHour: Int? {
-        guard let latest = allWeekTasks.max(by: {
+        guard let l = allWeekTasks.max(by: {
             $0.startTime.addingTimeInterval($0.duration) < $1.startTime.addingTimeInterval($1.duration)
         }) else { return nil }
-        let endDate = latest.startTime.addingTimeInterval(latest.duration)
-        let endHour = vm.calendar.component(.hour, from: endDate)
-        let endMinute = vm.calendar.component(.minute, from: endDate)
-        return endMinute > 0 ? min(endHour + 1, 24) : max(endHour, 1)
-    }
-    
-    private var hasAnyTasks: Bool {
-        !allWeekTasks.isEmpty
+        let end = l.startTime.addingTimeInterval(l.duration)
+        let h = vm.calendar.component(.hour, from: end)
+        let m = vm.calendar.component(.minute, from: end)
+        return m > 0 ? min(h + 1, 24) : max(h, 1)
     }
     
     private var hourRange: ClosedRange<Int> {
-        guard let first = earliestHour, let last = latestHour else {
-            return 0...0
-        }
-        let lo = max(0, first)
-        let hi = max(lo + 1, min(24, last))
-        return lo...hi
+        guard let lo = earliestHour, let hi = latestHour else { return 0...0 }
+        return max(0, lo)...max(max(0, lo) + 1, min(24, hi))
     }
     
-    private var hourCount: Int {
-        hourRange.upperBound - hourRange.lowerBound
-    }
+    private var hourCount: Int { hourRange.upperBound - hourRange.lowerBound }
     
     var body: some View {
         GeometryReader { geo in
             if !hasAnyTasks {
-                // ── NO TASKS: completely empty ──
                 Color.clear
             } else {
-                let availableHeight = geo.size.height - verticalPadding * 2
-                let naturalPPH = hourCount > 0 ? availableHeight / CGFloat(hourCount) : minPixelsPerHour
-                let pixelsPerHour = max(minPixelsPerHour, naturalPPH)
-                let contentHeight = CGFloat(hourCount) * pixelsPerHour + verticalPadding * 2
-                let needsScroll = contentHeight > geo.size.height + 1
-                let columnsWidth = geo.size.width - hourLabelWidth
-                let columnWidth = columnsWidth / CGFloat(max(weekDates.count, 1))
+                let screenWidth = geo.size.width
+                let availableH = geo.size.height - verticalPadding * 2
+                let pph = max(minPixelsPerHour, hourCount > 0 ? availableH / CGFloat(hourCount) : minPixelsPerHour)
+                let contentH = CGFloat(hourCount) * pph + verticalPadding * 2
+                let needsScroll = contentH > geo.size.height + 1
+                
+                // Match HorizontalCalendarView: it uses full width with .padding(.horizontal, 4)
+                // Each day column center = calendarStripHPadding + (dayIndex + 0.5) * columnWidth
+                let calColumnWidth = (screenWidth - calendarStripHPadding * 2) / 7.0
                 
                 if needsScroll {
                     ScrollView(.vertical, showsIndicators: false) {
-                        weekContent(
-                            pixelsPerHour: pixelsPerHour,
-                            contentHeight: contentHeight,
-                            columnWidth: columnWidth,
-                            columnsWidth: columnsWidth
-                        )
+                        weekContent(pph: pph, contentH: contentH, screenWidth: screenWidth, calColumnWidth: calColumnWidth)
                     }
                 } else {
-                    weekContent(
-                        pixelsPerHour: pixelsPerHour,
-                        contentHeight: max(contentHeight, geo.size.height),
-                        columnWidth: columnWidth,
-                        columnsWidth: columnsWidth
-                    )
+                    weekContent(pph: pph, contentH: max(contentH, geo.size.height), screenWidth: screenWidth, calColumnWidth: calColumnWidth)
                 }
             }
         }
     }
     
-    // MARK: - Week Content
+    // MARK: - Content
     
-    private func weekContent(
-        pixelsPerHour: CGFloat,
-        contentHeight: CGFloat,
-        columnWidth: CGFloat,
-        columnsWidth: CGFloat
-    ) -> some View {
+    private func weekContent(pph: CGFloat, contentH: CGFloat, screenWidth: CGFloat, calColumnWidth: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
-            // ── HOUR LABELS on the left ──
+            // Hour labels
             ForEach(hourRange.lowerBound..<hourRange.upperBound, id: \.self) { hour in
-                let y = verticalPadding + CGFloat(hour - hourRange.lowerBound) * pixelsPerHour
+                let y = verticalPadding + CGFloat(hour - hourRange.lowerBound) * pph
                 hourLabel(hour: hour)
                     .offset(x: 0, y: y - 7)
             }
             
-            // ── HOUR GRID LINES ──
+            // Hour grid lines
             ForEach(hourRange.lowerBound..<hourRange.upperBound, id: \.self) { hour in
-                let y = verticalPadding + CGFloat(hour - hourRange.lowerBound) * pixelsPerHour
+                let y = verticalPadding + CGFloat(hour - hourRange.lowerBound) * pph
                 Path { p in
                     p.move(to: CGPoint(x: hourLabelWidth, y: y))
-                    p.addLine(to: CGPoint(x: hourLabelWidth + columnsWidth, y: y))
+                    p.addLine(to: CGPoint(x: screenWidth, y: y))
                 }
                 .stroke(Color.gray.opacity(0.08), lineWidth: 0.5)
             }
             
-            // ── 7 DAY COLUMNS ──
-            HStack(spacing: 0) {
-                ForEach(Array(weekDates.enumerated()), id: \.offset) { _, date in
-                    dayColumn(
-                        for: date,
-                        pixelsPerHour: pixelsPerHour,
-                        contentHeight: contentHeight,
-                        columnWidth: columnWidth
-                    )
-                    .frame(width: columnWidth)
-                }
+            // Day columns — positioned to match HorizontalCalendarView centers
+            ForEach(Array(weekDates.enumerated()), id: \.offset) { dayIndex, date in
+                let centerX = calendarStripHPadding + (CGFloat(dayIndex) + 0.5) * calColumnWidth
+                dayColumn(for: date, centerX: centerX, pph: pph, contentH: contentH)
             }
-            .offset(x: hourLabelWidth)
         }
-        .frame(height: contentHeight)
+        .frame(width: screenWidth, height: contentH)
     }
     
     // MARK: - Hour Label
     
     private func hourLabel(hour: Int) -> some View {
-        let displayHour = hour == 24 ? 0 : hour
+        let d = hour == 24 ? 0 : hour
         return HStack(spacing: 0) {
-            Text(String(format: "%02d", displayHour))
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+            Text(String(format: "%02d", d))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundColor(Color.gray.opacity(0.5))
             Text("⁰⁰")
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .font(.system(size: 7, weight: .medium, design: .monospaced))
                 .foregroundColor(Color.gray.opacity(0.4))
                 .baselineOffset(4)
         }
@@ -146,121 +113,75 @@ struct WeekOverviewView: View {
         .padding(.leading, 4)
     }
     
-    // MARK: - Day Column
+    // MARK: - Day Column (absolute positioning)
     
-    @ViewBuilder
-    private func dayColumn(
-        for date: Date,
-        pixelsPerHour: CGFloat,
-        contentHeight: CGFloat,
-        columnWidth: CGFloat
-    ) -> some View {
+    private func dayColumn(for date: Date, centerX: CGFloat, pph: CGFloat, contentH: CGFloat) -> some View {
         let isSelected = vm.calendar.isDate(date, inSameDayAs: vm.selectedDate)
         let dayTasks = vm.tasksFor(date: date).sorted { $0.startTime < $1.startTime }
-        let centerX = columnWidth / 2
         
-        ZStack(alignment: .top) {
-            
-            // ── BASELINE LINE ──
+        return ZStack {
+            // Baseline vertical line
             Path { p in
                 p.move(to: CGPoint(x: centerX, y: 0))
-                p.addLine(to: CGPoint(x: centerX, y: contentHeight))
+                p.addLine(to: CGPoint(x: centerX, y: contentH))
             }
-            .stroke(
-                Color.gray.opacity(isSelected ? 0.3 : 0.15),
-                lineWidth: 1
-            )
+            .stroke(Color.gray.opacity(isSelected ? 0.3 : 0.15), lineWidth: 1)
             
             if !dayTasks.isEmpty {
-                
-                // ── GRADIENT LINES between consecutive tasks ──
+                // Gradient lines between consecutive tasks
                 if dayTasks.count >= 2 {
                     ForEach(0..<dayTasks.count - 1, id: \.self) { i in
-                        let task = dayTasks[i]
-                        let nextTask = dayTasks[i + 1]
-                        
-                        let y1 = yFor(task.startTime, pixelsPerHour: pixelsPerHour)
-                            + pillH(for: task, pixelsPerHour: pixelsPerHour)
-                        let y2 = yFor(nextTask.startTime, pixelsPerHour: pixelsPerHour)
+                        let t = dayTasks[i]
+                        let nt = dayTasks[i + 1]
+                        let y1 = yFor(t.startTime, pph: pph) + miniPillSize / 2
+                        let y2 = yFor(nt.startTime, pph: pph) - miniPillSize / 2
                         
                         if y2 > y1 {
-                            let c1 = isSelected ? task.color : task.color.opacity(0.2)
-                            let c2 = isSelected ? nextTask.color : nextTask.color.opacity(0.2)
-                            
                             Path { p in
                                 p.move(to: CGPoint(x: centerX, y: y1))
                                 p.addLine(to: CGPoint(x: centerX, y: y2))
                             }
                             .stroke(
-                                LinearGradient(colors: [c1, c2], startPoint: .top, endPoint: .bottom),
+                                LinearGradient(
+                                    colors: [
+                                        isSelected ? t.color : t.color.opacity(0.2),
+                                        isSelected ? nt.color : nt.color.opacity(0.2)
+                                    ],
+                                    startPoint: .top, endPoint: .bottom
+                                ),
                                 lineWidth: isSelected ? 3 : 1.5
                             )
                         }
                     }
                 }
                 
-                // ── SOLID LINE through each task's duration ──
+                // Task circles (always circles, never capsules)
                 ForEach(dayTasks) { task in
-                    let y = yFor(task.startTime, pixelsPerHour: pixelsPerHour)
-                    let h = pillH(for: task, pixelsPerHour: pixelsPerHour)
-                    let c = isSelected ? task.color : task.color.opacity(0.2)
+                    let y = yFor(task.startTime, pph: pph)
                     
-                    Path { p in
-                        p.move(to: CGPoint(x: centerX, y: y))
-                        p.addLine(to: CGPoint(x: centerX, y: y + h))
+                    ZStack {
+                        Circle()
+                            .fill(isSelected ? task.color : Color.gray.opacity(0.3))
+                            .frame(width: miniPillSize, height: miniPillSize)
+                        
+                        Image(systemName: task.icon ?? "doc.text.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(isSelected ? .white : task.color.opacity(0.6))
                     }
-                    .stroke(c, lineWidth: isSelected ? 3 : 1.5)
-                }
-                
-                // ── MINI PILL ICONS ──
-                ForEach(dayTasks) { task in
-                    let y = yFor(task.startTime, pixelsPerHour: pixelsPerHour)
-                    let h = pillH(for: task, pixelsPerHour: pixelsPerHour)
-                    
-                    miniPill(task: task, isSelected: isSelected, height: h)
-                        .position(x: centerX, y: y + h / 2)
+                    .position(x: centerX, y: y)
                 }
             }
         }
-        .frame(height: contentHeight)
-    }
-    
-    // MARK: - Mini Pill
-    
-    private func miniPill(task: TaskItem, isSelected: Bool, height: CGFloat) -> some View {
-        ZStack {
-            if height > miniPillSize * 1.5 {
-                Capsule()
-                    .fill(isSelected ? task.color : Color.gray.opacity(0.3))
-                    .frame(width: miniPillSize, height: height)
-                    .overlay(
-                        Capsule()
-                            .stroke(isSelected ? Color.white.opacity(0.15) : Color.clear, lineWidth: 2)
-                    )
-            } else {
-                Circle()
-                    .fill(isSelected ? task.color : Color.gray.opacity(0.3))
-                    .frame(width: miniPillSize, height: miniPillSize)
-            }
-            
-            Image(systemName: task.icon ?? "doc.text.fill")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(isSelected ? .white : task.color.opacity(0.6))
-        }
+        .frame(height: contentH)
     }
     
     // MARK: - Helpers
     
-    private func yFor(_ date: Date, pixelsPerHour: CGFloat) -> CGFloat {
+    private func yFor(_ date: Date, pph: CGFloat) -> CGFloat {
         let comps = vm.calendar.dateComponents([.hour, .minute], from: date)
         let h = comps.hour ?? 0
         let m = comps.minute ?? 0
-        let minutesSinceRangeStart = CGFloat((h - hourRange.lowerBound) * 60 + m)
-        return verticalPadding + (minutesSinceRangeStart / 60.0) * pixelsPerHour
-    }
-    
-    private func pillH(for task: TaskItem, pixelsPerHour: CGFloat) -> CGFloat {
-        let h = (CGFloat(task.durationMinutes) / 60.0) * pixelsPerHour
-        return max(miniPillSize, h)
+        let minsFromStart = CGFloat((h - hourRange.lowerBound) * 60 + m)
+        return verticalPadding + (minsFromStart / 60.0) * pph
     }
 }
