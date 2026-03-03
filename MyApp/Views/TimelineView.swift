@@ -1,17 +1,89 @@
 import SwiftUI
 
+// MARK: - Horizontal-pass-through ScrollView
+/// A vertical ScrollView that does NOT block horizontal swipes,
+/// allowing the parent TabView to handle page changes.
+///
+/// How it works:
+/// - We subclass UIScrollView so we can override `gestureRecognizerShouldBegin`.
+/// - If the user's finger moves more horizontally than vertically, we return false,
+///   which cancels OUR scroll and lets the TabView's page-swipe take over.
+/// - No delegate override needed — avoids the crash.
+
+final class HorizontalPassthroughScrollView: UIScrollView {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Only intercept the built-in pan gesture
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
+              pan === self.panGestureRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        
+        let velocity = pan.velocity(in: self)
+        // If the swipe is more horizontal than vertical, do NOT begin scrolling.
+        // This lets the TabView's pan recognizer win and swipe the week page.
+        if abs(velocity.x) > abs(velocity.y) {
+            return false
+        }
+        return true
+    }
+}
+
+struct PageFriendlyScrollView<Content: View>: UIViewRepresentable {
+    let content: Content
+    
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+    
+    func makeUIView(context: Context) -> HorizontalPassthroughScrollView {
+        let scrollView = HorizontalPassthroughScrollView()
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.alwaysBounceVertical = true
+        scrollView.alwaysBounceHorizontal = false
+        scrollView.backgroundColor = .clear
+        
+        let hostingController = UIHostingController(rootView: content)
+        hostingController.view.backgroundColor = .clear
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        
+        scrollView.addSubview(hostingController.view)
+        
+        NSLayoutConstraint.activate([
+            hostingController.view.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            hostingController.view.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            hostingController.view.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
+        ])
+        
+        context.coordinator.hostingController = hostingController
+        
+        return scrollView
+    }
+    
+    func updateUIView(_ scrollView: HorizontalPassthroughScrollView, context: Context) {
+        context.coordinator.hostingController?.rootView = content
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+    
+    class Coordinator {
+        var hostingController: UIHostingController<Content>?
+    }
+}
+
+
 struct TimelineView: View {
     @StateObject private var vm = DayScheduleViewModel()
     @State private var showingAdd = false
     @State private var editingTask: TaskItem?
     
-    /// Which week page we're on, as an offset from "this week" (0 = current week)
     @State private var currentWeekOffset: Int = 0
-    
-    /// Shared reveal state so all pages match (Point 3)
     @State private var revealProgress: CGFloat = 0
     
-    // Fixed range — never changes, so TabView pages are stable (Point 1)
     private let weekRange = -52...52
     
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
@@ -78,8 +150,6 @@ struct WeekPageView: View {
     let weekOffset: Int
     @Binding var showingAdd: Bool
     @Binding var editingTask: TaskItem?
-    
-    /// Shared from parent — all pages read/write the same value (Point 3)
     @Binding var revealProgress: CGFloat
     
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
@@ -91,23 +161,18 @@ struct WeekPageView: View {
     }
     private var isRevealed: Bool { revealProgress > 0.5 }
     
-    /// The 7 dates (Mon→Sun) for THIS week page
     private var weekDates: [Date] {
         let todayMonday = vm.mondayOf(date: Date())
         guard let pageMonday = vm.calendar.date(byAdding: .weekOfYear, value: weekOffset, to: todayMonday) else { return [] }
         return vm.weekDates(for: pageMonday)
     }
     
-    /// Whether selectedDate belongs to this page's week
     private var isCurrentPage: Bool {
         let selectedMonday = vm.mondayOf(date: vm.selectedDate)
         let todayMonday = vm.mondayOf(date: Date())
         guard let pageMonday = vm.calendar.date(byAdding: .weekOfYear, value: weekOffset, to: todayMonday) else { return false }
         return vm.calendar.isDate(selectedMonday, inSameDayAs: pageMonday)
     }
-    
-    /// Tracks whether the current drag is vertical (reveal) or should be ignored (horizontal = page swipe)
-    @GestureState private var isDraggingVertically = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -123,7 +188,7 @@ struct WeekPageView: View {
             
             // ═══════════════════════════════════
             // CALENDAR STRIP
-            // ��══════════════════════════════════
+            // ═══════════════════════════════════
             HorizontalCalendarView(
                 selectedDate: $vm.selectedDate,
                 vm: vm,
@@ -147,12 +212,35 @@ struct WeekPageView: View {
                         .animation(.easeOut(duration: 0.2), value: revealProgress > 0.05)
                     
                     VStack(spacing: 0) {
-                        // Drag handle
+                        // ── Drag handle: ONLY this controls reveal ──
                         Capsule()
                             .fill(Color.gray.opacity(0.5))
                             .frame(width: 40, height: 5)
                             .padding(.top, 10)
                             .padding(.bottom, 8)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 8)
+                                    .onChanged { value in
+                                        let delta = value.translation.height
+                                        let newProgress = revealProgress + delta / maxOffset
+                                        revealProgress = min(1, max(0, newProgress))
+                                    }
+                                    .onEnded { value in
+                                        let velocity = value.predictedEndTranslation.height
+                                        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                            if value.translation.height > 80 || velocity > 200 {
+                                                revealProgress = 1
+                                            } else if value.translation.height < -60 || velocity < -200 {
+                                                revealProgress = 0
+                                            } else {
+                                                revealProgress = revealProgress > 0.5 ? 1 : 0
+                                            }
+                                        }
+                                    }
+                            )
                         
                         if revealProgress < 0.85 {
                             dayTimelineContent
@@ -170,36 +258,6 @@ struct WeekPageView: View {
                         radius: 20, y: -5
                     )
                     .offset(y: currentOffset)
-                    // Use simultaneousGesture so TabView can still detect horizontal swipes (Point 2)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 12)
-                            .onChanged { value in
-                                // Only handle vertical drags; let horizontal pass through to TabView
-                                let h = abs(value.translation.height)
-                                let w = abs(value.translation.width)
-                                guard h > w * 1.2 else { return } // Must be predominantly vertical
-                                
-                                let delta = value.translation.height
-                                let newProgress = revealProgress + delta / maxOffset
-                                revealProgress = min(1, max(0, newProgress))
-                            }
-                            .onEnded { value in
-                                let h = abs(value.translation.height)
-                                let w = abs(value.translation.width)
-                                guard h > w * 1.2 else { return }
-                                
-                                let velocity = value.predictedEndTranslation.height
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                    if value.translation.height > 80 || velocity > 200 {
-                                        revealProgress = 1
-                                    } else if value.translation.height < -60 || velocity < -200 {
-                                        revealProgress = 0
-                                    } else {
-                                        revealProgress = revealProgress > 0.5 ? 1 : 0
-                                    }
-                                }
-                            }
-                    )
                 }
             }
         }
@@ -264,80 +322,74 @@ struct WeekPageView: View {
     
     // MARK: - Day Timeline Content
     private var dayTimelineContent: some View {
-        ScrollViewReader { scrollProxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                ZStack(alignment: .topLeading) {
-                    VStack(spacing: 0) {
-                        ForEach(0..<24, id: \.self) { hour in
-                            Color.clear
-                                .frame(height: 60 * vm.pixelsPerMinute)
-                                .id(hour)
-                        }
-                    }
-                    
-                    TimeColumnView(vm: vm)
-                    
-                    Path { path in
-                        path.move(to: CGPoint(x: 0, y: 0))
-                        path.addLine(to: CGPoint(x: 0, y: vm.timelineHeight()))
-                    }
-                    .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-                    .offset(x: lineX)
-                    
-                    ForEach(vm.layoutAttributes, id: \.task.id) { layout in
-                        Path { path in
-                            path.move(to: CGPoint(x: 0, y: layout.yPos))
-                            path.addLine(to: CGPoint(x: 0, y: layout.yPos + layout.height))
-                        }
-                        .stroke(layout.task.color, style: StrokeStyle(lineWidth: 2.5))
-                        .offset(x: lineX)
-                        .zIndex(-1)
-                    }
-                    
-                    if vm.calendar.isDate(vm.selectedDate, inSameDayAs: Date()) {
-                        let currentY = vm.yPosition(for: vm.currentTime)
-                        Text(vm.currentTime.formatted(date: .omitted, time: .shortened))
-                            .font(.caption2.weight(.bold))
-                            .foregroundColor(.white)
-                            .frame(width: vm.timeColumnWidth, alignment: .trailing)
-                            .offset(y: currentY - 7)
-                            .animation(.linear(duration: 1.0), value: currentY)
-                            .zIndex(50)
-                    }
-                    
-                    ForEach(vm.layoutAttributes, id: \.task.id) { layout in
-                        if layout.showOverlapWarning {
-                            HStack(spacing: 0) {
-                                Text("Tasks are ")
-                                    .foregroundColor(.gray)
-                                Text("overlapping")
-                                    .foregroundColor(themePink)
-                            }
-                            .font(.caption.weight(.medium))
-                            .offset(x: vm.timeColumnWidth + 10 + vm.pillWidth + 16,
-                                    y: layout.warningYPos)
-                            .zIndex(100)
-                        }
-                        
-                        HStack {
-                            Spacer().frame(width: vm.timeColumnWidth + 10)
-                            TaskBlockView(
-                                task: layout.task,
-                                height: layout.height,
-                                isEyeOverlap: layout.isEyeOverlap,
-                                onTap: { editingTask = layout.task },
-                                onToggleComplete: { vm.toggleCompletion(for: layout.task) }
-                            )
-                        }
-                        .offset(y: layout.yPos)
-                        .zIndex(layout.zIndex)
+        PageFriendlyScrollView {
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    ForEach(0..<24, id: \.self) { hour in
+                        Color.clear
+                            .frame(height: 60 * vm.pixelsPerMinute)
                     }
                 }
-                .frame(height: vm.timelineHeight() + 100, alignment: .top)
-                .padding(.vertical, 20)
+                
+                TimeColumnView(vm: vm)
+                
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: 0))
+                    path.addLine(to: CGPoint(x: 0, y: vm.timelineHeight()))
+                }
+                .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                .offset(x: lineX)
+                
+                ForEach(vm.layoutAttributes, id: \.task.id) { layout in
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: layout.yPos))
+                        path.addLine(to: CGPoint(x: 0, y: layout.yPos + layout.height))
+                    }
+                    .stroke(layout.task.color, style: StrokeStyle(lineWidth: 2.5))
+                    .offset(x: lineX)
+                    .zIndex(-1)
+                }
+                
+                if vm.calendar.isDate(vm.selectedDate, inSameDayAs: Date()) {
+                    let currentY = vm.yPosition(for: vm.currentTime)
+                    Text(vm.currentTime.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2.weight(.bold))
+                        .foregroundColor(.white)
+                        .frame(width: vm.timeColumnWidth, alignment: .trailing)
+                        .offset(y: currentY - 7)
+                        .zIndex(50)
+                }
+                
+                ForEach(vm.layoutAttributes, id: \.task.id) { layout in
+                    if layout.showOverlapWarning {
+                        HStack(spacing: 0) {
+                            Text("Tasks are ")
+                                .foregroundColor(.gray)
+                            Text("overlapping")
+                                .foregroundColor(themePink)
+                        }
+                        .font(.caption.weight(.medium))
+                        .offset(x: vm.timeColumnWidth + 10 + vm.pillWidth + 16,
+                                y: layout.warningYPos)
+                        .zIndex(100)
+                    }
+                    
+                    HStack {
+                        Spacer().frame(width: vm.timeColumnWidth + 10)
+                        TaskBlockView(
+                            task: layout.task,
+                            height: layout.height,
+                            isEyeOverlap: layout.isEyeOverlap,
+                            onTap: { editingTask = layout.task },
+                            onToggleComplete: { vm.toggleCompletion(for: layout.task) }
+                        )
+                    }
+                    .offset(y: layout.yPos)
+                    .zIndex(layout.zIndex)
+                }
             }
-            .onAppear { scrollToCurrentHour(using: scrollProxy) }
-            .onChange(of: vm.selectedDate) { scrollToCurrentHour(using: scrollProxy) }
+            .frame(height: vm.timelineHeight() + 100, alignment: .top)
+            .padding(.vertical, 20)
         }
     }
     
@@ -398,17 +450,5 @@ struct WeekPageView: View {
         }
         
         Spacer(minLength: 0)
-    }
-    
-    // MARK: - Scroll Helper
-    private func scrollToCurrentHour(using proxy: ScrollViewProxy) {
-        if vm.calendar.isDate(vm.selectedDate, inSameDayAs: Date()) {
-            let currentHour = vm.calendar.component(.hour, from: vm.currentTime)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                withAnimation(.easeOut(duration: 0.6)) {
-                    proxy.scrollTo(currentHour, anchor: .center)
-                }
-            }
-        }
     }
 }
