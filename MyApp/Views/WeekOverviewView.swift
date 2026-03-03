@@ -3,33 +3,27 @@ import SwiftUI
 /// The "back page" week overview with adaptive hour labels.
 /// - Scans all 7 days to find the earliest task start and latest task end
 /// - Only shows hours in that range
-/// - Spacing adapts: few hours = compact (fits screen), many hours = expanded (scrollable)
-/// - Hour labels on the left in "06⁰⁰" superscript style
+/// - No tasks = completely empty (no hour labels, no lines)
 struct WeekOverviewView: View {
     @ObservedObject var vm: DayScheduleViewModel
     let weekDates: [Date]
     
     private let miniPillSize: CGFloat = 40
     private let hourLabelWidth: CGFloat = 44
-    /// Minimum pixels per hour — ensures pills are always readable
     private let minPixelsPerHour: CGFloat = 60
-    /// Padding above first hour and below last hour
     private let verticalPadding: CGFloat = 30
     
     // MARK: - Computed: Hour Range from task data
     
-    /// All tasks across the 7 days of this week
     private var allWeekTasks: [TaskItem] {
         weekDates.flatMap { vm.tasksFor(date: $0) }
     }
     
-    /// Earliest task start hour (floored). nil if no tasks.
     private var earliestHour: Int? {
         guard let earliest = allWeekTasks.min(by: { $0.startTime < $1.startTime }) else { return nil }
         return vm.calendar.component(.hour, from: earliest.startTime)
     }
     
-    /// Latest task end hour (ceiled). nil if no tasks.
     private var latestHour: Int? {
         guard let latest = allWeekTasks.max(by: {
             $0.startTime.addingTimeInterval($0.duration) < $1.startTime.addingTimeInterval($1.duration)
@@ -37,59 +31,62 @@ struct WeekOverviewView: View {
         let endDate = latest.startTime.addingTimeInterval(latest.duration)
         let endHour = vm.calendar.component(.hour, from: endDate)
         let endMinute = vm.calendar.component(.minute, from: endDate)
-        // Ceil: if task ends at 14:30, we need to show up to 15:00
         return endMinute > 0 ? min(endHour + 1, 24) : max(endHour, 1)
     }
     
-    /// The range of hours to display
+    private var hasAnyTasks: Bool {
+        !allWeekTasks.isEmpty
+    }
+    
     private var hourRange: ClosedRange<Int> {
         guard let first = earliestHour, let last = latestHour else {
-            // No tasks — show a default range
-            return 6...22
+            return 0...0
         }
-        // Ensure at least 1 hour span
         let lo = max(0, first)
         let hi = max(lo + 1, min(24, last))
         return lo...hi
     }
     
-    /// Number of hours in the range
     private var hourCount: Int {
         hourRange.upperBound - hourRange.lowerBound
     }
     
     var body: some View {
         GeometryReader { geo in
-            let availableHeight = geo.size.height - verticalPadding * 2
-            // Adaptive: use available height if it fits, otherwise expand
-            let naturalPPH = hourCount > 0 ? availableHeight / CGFloat(hourCount) : minPixelsPerHour
-            let pixelsPerHour = max(minPixelsPerHour, naturalPPH)
-            let contentHeight = CGFloat(hourCount) * pixelsPerHour + verticalPadding * 2
-            let needsScroll = contentHeight > geo.size.height + 1
-            let columnsWidth = geo.size.width - hourLabelWidth
-            let columnWidth = columnsWidth / CGFloat(max(weekDates.count, 1))
-            
-            if needsScroll {
-                ScrollView(.vertical, showsIndicators: false) {
+            if !hasAnyTasks {
+                // ── NO TASKS: completely empty ──
+                Color.clear
+            } else {
+                let availableHeight = geo.size.height - verticalPadding * 2
+                let naturalPPH = hourCount > 0 ? availableHeight / CGFloat(hourCount) : minPixelsPerHour
+                let pixelsPerHour = max(minPixelsPerHour, naturalPPH)
+                let contentHeight = CGFloat(hourCount) * pixelsPerHour + verticalPadding * 2
+                let needsScroll = contentHeight > geo.size.height + 1
+                let columnsWidth = geo.size.width - hourLabelWidth
+                let columnWidth = columnsWidth / CGFloat(max(weekDates.count, 1))
+                
+                if needsScroll {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        weekContent(
+                            pixelsPerHour: pixelsPerHour,
+                            contentHeight: contentHeight,
+                            columnWidth: columnWidth,
+                            columnsWidth: columnsWidth
+                        )
+                    }
+                } else {
                     weekContent(
                         pixelsPerHour: pixelsPerHour,
-                        contentHeight: contentHeight,
+                        contentHeight: max(contentHeight, geo.size.height),
                         columnWidth: columnWidth,
                         columnsWidth: columnsWidth
                     )
                 }
-            } else {
-                weekContent(
-                    pixelsPerHour: pixelsPerHour,
-                    contentHeight: max(contentHeight, geo.size.height),
-                    columnWidth: columnWidth,
-                    columnsWidth: columnsWidth
-                )
             }
         }
     }
     
-    // MARK: - Week Content (hour labels + 7 columns)
+    // MARK: - Week Content
     
     private func weekContent(
         pixelsPerHour: CGFloat,
@@ -102,10 +99,10 @@ struct WeekOverviewView: View {
             ForEach(hourRange.lowerBound..<hourRange.upperBound, id: \.self) { hour in
                 let y = verticalPadding + CGFloat(hour - hourRange.lowerBound) * pixelsPerHour
                 hourLabel(hour: hour)
-                    .offset(x: 0, y: y - 7) // -7 to center text on the line
+                    .offset(x: 0, y: y - 7)
             }
             
-            // ── HOUR GRID LINES (subtle) ──
+            // ── HOUR GRID LINES ──
             ForEach(hourRange.lowerBound..<hourRange.upperBound, id: \.self) { hour in
                 let y = verticalPadding + CGFloat(hour - hourRange.lowerBound) * pixelsPerHour
                 Path { p in
@@ -132,7 +129,7 @@ struct WeekOverviewView: View {
         .frame(height: contentHeight)
     }
     
-    // MARK: - Hour Label (superscript style like Structured: "06⁰⁰")
+    // MARK: - Hour Label
     
     private func hourLabel(hour: Int) -> some View {
         let displayHour = hour == 24 ? 0 : hour
@@ -254,8 +251,6 @@ struct WeekOverviewView: View {
     
     // MARK: - Helpers
     
-    /// Map time-of-day → Y position relative to the hourRange.
-    /// hourRange.lowerBound:00 = verticalPadding, each hour = pixelsPerHour
     private func yFor(_ date: Date, pixelsPerHour: CGFloat) -> CGFloat {
         let comps = vm.calendar.dateComponents([.hour, .minute], from: date)
         let h = comps.hour ?? 0
@@ -264,7 +259,6 @@ struct WeekOverviewView: View {
         return verticalPadding + (minutesSinceRangeStart / 60.0) * pixelsPerHour
     }
     
-    /// Pill height proportional to task duration using adaptive pixelsPerHour.
     private func pillH(for task: TaskItem, pixelsPerHour: CGFloat) -> CGFloat {
         let h = (CGFloat(task.durationMinutes) / 60.0) * pixelsPerHour
         return max(miniPillSize, h)

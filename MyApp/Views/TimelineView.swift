@@ -1,26 +1,13 @@
 import SwiftUI
 
 // MARK: - Horizontal-pass-through ScrollView
-/// A vertical ScrollView that does NOT block horizontal swipes,
-/// allowing the parent TabView to handle page changes.
-///
-/// How it works:
-/// - We subclass UIScrollView so we can override `gestureRecognizerShouldBegin`.
-/// - If the user's finger moves more horizontally than vertically, we return false,
-///   which cancels OUR scroll and lets the TabView's page-swipe take over.
-/// - No delegate override needed — avoids the crash.
-
 final class HorizontalPassthroughScrollView: UIScrollView {
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Only intercept the built-in pan gesture
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
               pan === self.panGestureRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
-        
         let velocity = pan.velocity(in: self)
-        // If the swipe is more horizontal than vertical, do NOT begin scrolling.
-        // This lets the TabView's pan recognizer win and swipe the week page.
         if abs(velocity.x) > abs(velocity.y) {
             return false
         }
@@ -156,9 +143,6 @@ struct WeekPageView: View {
     let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
     let themePink = Color(red: 1.0, green: 0.54, blue: 0.54)
     
-    private var lineX: CGFloat {
-        vm.timeColumnWidth + 10 + 22 - 0.75
-    }
     private var isRevealed: Bool { revealProgress > 0.5 }
     
     private var weekDates: [Date] {
@@ -177,18 +161,12 @@ struct WeekPageView: View {
     var body: some View {
         VStack(spacing: 0) {
             
-            // ═══════════════════════════════════
-            // HEADER
-            // ═══════════════════════════════════
             if isCurrentPage {
                 headerView
             } else {
                 headerViewForPage
             }
             
-            // ═══════════════════════════════════
-            // CALENDAR STRIP
-            // ═══════════════════════════════════
             HorizontalCalendarView(
                 selectedDate: $vm.selectedDate,
                 vm: vm,
@@ -196,9 +174,6 @@ struct WeekPageView: View {
             )
             .padding(.bottom, 10)
             
-            // ═══════════════════════════════════
-            // TWO-LAYER STACK
-            // ═══════════════════════════════════
             GeometryReader { geo in
                 let totalH = geo.size.height
                 let collapsedCardH: CGFloat = 130
@@ -212,7 +187,6 @@ struct WeekPageView: View {
                         .animation(.easeOut(duration: 0.2), value: revealProgress > 0.05)
                     
                     VStack(spacing: 0) {
-                        // ── Drag handle: ONLY this controls reveal ──
                         Capsule()
                             .fill(Color.gray.opacity(0.5))
                             .frame(width: 40, height: 5)
@@ -243,7 +217,7 @@ struct WeekPageView: View {
                             )
                         
                         if revealProgress < 0.85 {
-                            dayTimelineContent
+                            dayTimelineContent(availableHeight: totalH - 44)
                         } else {
                             collapsedTaskPill
                         }
@@ -320,76 +294,85 @@ struct WeekPageView: View {
         .padding(.bottom, 8)
     }
     
-    // MARK: - Day Timeline Content
-    private var dayTimelineContent: some View {
-        PageFriendlyScrollView {
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    ForEach(0..<24, id: \.self) { hour in
+    // MARK: - Day Timeline Content (ADAPTIVE)
+    private func dayTimelineContent(availableHeight: CGFloat) -> some View {
+        let hasTasks = !vm.tasks.isEmpty
+        let ppm = vm.adaptivePixelsPerMinute(availableHeight: availableHeight)
+        let lineX = vm.timeColumnWidth + 10 + 22 - CGFloat(0.75)
+        
+        return Group {
+            if !hasTasks {
+                // ── NO TASKS: empty state ──
+                VStack {
+                    Spacer()
+                    Text("No tasks for this day")
+                        .font(.subheadline)
+                        .foregroundColor(.gray.opacity(0.5))
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                PageFriendlyScrollView {
+                    ZStack(alignment: .topLeading) {
+                        // Invisible spacer for height
                         Color.clear
-                            .frame(height: 60 * vm.pixelsPerMinute)
-                    }
-                }
-                
-                TimeColumnView(vm: vm)
-                
-                Path { path in
-                    path.move(to: CGPoint(x: 0, y: 0))
-                    path.addLine(to: CGPoint(x: 0, y: vm.timelineHeight()))
-                }
-                .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-                .offset(x: lineX)
-                
-                ForEach(vm.layoutAttributes, id: \.task.id) { layout in
-                    Path { path in
-                        path.move(to: CGPoint(x: 0, y: layout.yPos))
-                        path.addLine(to: CGPoint(x: 0, y: layout.yPos + layout.height))
-                    }
-                    .stroke(layout.task.color, style: StrokeStyle(lineWidth: 2.5))
-                    .offset(x: lineX)
-                    .zIndex(-1)
-                }
-                
-                if vm.calendar.isDate(vm.selectedDate, inSameDayAs: Date()) {
-                    let currentY = vm.yPosition(for: vm.currentTime)
-                    Text(vm.currentTime.formatted(date: .omitted, time: .shortened))
-                        .font(.caption2.weight(.bold))
-                        .foregroundColor(.white)
-                        .frame(width: vm.timeColumnWidth, alignment: .trailing)
-                        .offset(y: currentY - 7)
-                        .zIndex(50)
-                }
-                
-                ForEach(vm.layoutAttributes, id: \.task.id) { layout in
-                    if layout.showOverlapWarning {
-                        HStack(spacing: 0) {
-                            Text("Tasks are ")
-                                .foregroundColor(.gray)
-                            Text("overlapping")
-                                .foregroundColor(themePink)
+                            .frame(height: vm.adaptiveTimelineHeight(ppm: ppm))
+                        
+                        // Adaptive time column
+                        TimeColumnView(vm: vm, adaptivePPM: ppm)
+                        
+                        // Dashed center line
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: 0))
+                            path.addLine(to: CGPoint(x: 0, y: vm.adaptiveTimelineHeight(ppm: ppm)))
                         }
-                        .font(.caption.weight(.medium))
-                        .offset(x: vm.timeColumnWidth + 10 + vm.pillWidth + 16,
-                                y: layout.warningYPos)
-                        .zIndex(100)
+                        .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                        .offset(x: lineX)
+                        
+                        // Task color lines
+                        ForEach(vm.adaptiveLayoutAttributes(ppm: ppm), id: \.task.id) { layout in
+                            Path { path in
+                                path.move(to: CGPoint(x: 0, y: layout.yPos))
+                                path.addLine(to: CGPoint(x: 0, y: layout.yPos + layout.height))
+                            }
+                            .stroke(layout.task.color, style: StrokeStyle(lineWidth: 2.5))
+                            .offset(x: lineX)
+                            .zIndex(-1)
+                        }
+                        
+                        // Task blocks
+                        ForEach(vm.adaptiveLayoutAttributes(ppm: ppm), id: \.task.id) { layout in
+                            if layout.showOverlapWarning {
+                                HStack(spacing: 0) {
+                                    Text("Tasks are ")
+                                        .foregroundColor(.gray)
+                                    Text("overlapping")
+                                        .foregroundColor(themePink)
+                                }
+                                .font(.caption.weight(.medium))
+                                .offset(x: vm.timeColumnWidth + 10 + vm.pillWidth + 16,
+                                        y: layout.warningYPos)
+                                .zIndex(100)
+                            }
+                            
+                            HStack {
+                                Spacer().frame(width: vm.timeColumnWidth + 10)
+                                TaskBlockView(
+                                    task: layout.task,
+                                    height: layout.height,
+                                    isEyeOverlap: layout.isEyeOverlap,
+                                    onTap: { editingTask = layout.task },
+                                    onToggleComplete: { vm.toggleCompletion(for: layout.task) }
+                                )
+                            }
+                            .offset(y: layout.yPos)
+                            .zIndex(layout.zIndex)
+                        }
                     }
-                    
-                    HStack {
-                        Spacer().frame(width: vm.timeColumnWidth + 10)
-                        TaskBlockView(
-                            task: layout.task,
-                            height: layout.height,
-                            isEyeOverlap: layout.isEyeOverlap,
-                            onTap: { editingTask = layout.task },
-                            onToggleComplete: { vm.toggleCompletion(for: layout.task) }
-                        )
-                    }
-                    .offset(y: layout.yPos)
-                    .zIndex(layout.zIndex)
+                    .frame(height: vm.adaptiveTimelineHeight(ppm: ppm) + 60, alignment: .top)
+                    .padding(.vertical, 20)
                 }
             }
-            .frame(height: vm.timelineHeight() + 100, alignment: .top)
-            .padding(.vertical, 20)
         }
     }
     
