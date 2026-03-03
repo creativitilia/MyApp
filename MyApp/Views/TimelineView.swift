@@ -8,8 +8,10 @@ struct TimelineView: View {
     /// Which week page we're on, as an offset from "this week" (0 = current week)
     @State private var currentWeekOffset: Int = 0
     
-    // Provide a range of weeks the user can swipe through
-    private let weekRange = -52...52 // ±1 year
+    /// Only keep a small window of pages loaded for performance
+    private var weekRange: ClosedRange<Int> {
+        (currentWeekOffset - 4)...(currentWeekOffset + 4)
+    }
     
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
     let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
@@ -18,7 +20,7 @@ struct TimelineView: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             TabView(selection: $currentWeekOffset) {
-                ForEach(weekRange, id: \.self) { offset in
+                ForEach(Array(weekRange.lowerBound...weekRange.upperBound), id: \.self) { offset in
                     WeekPageView(
                         vm: vm,
                         weekOffset: offset,
@@ -31,18 +33,19 @@ struct TimelineView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .background(darkerBackground.ignoresSafeArea())
             .onChange(of: currentWeekOffset) { _, newOffset in
-                // When swiping to a new week, update selectedDate to Monday of that week
-                // (or keep the same weekday if possible)
                 let today = Date()
                 let todayMonday = vm.mondayOf(date: today)
                 if let newMonday = vm.calendar.date(byAdding: .weekOfYear, value: newOffset, to: todayMonday) {
-                    // Keep the same weekday position the user had selected
                     let currentWeekday = vm.calendar.component(.weekday, from: vm.selectedDate)
-                    let wdOffset = (currentWeekday + 5) % 7 // 0=Mon,...,6=Sun
+                    let wdOffset = (currentWeekday + 5) % 7
                     if let newDate = vm.calendar.date(byAdding: .day, value: wdOffset, to: newMonday) {
-                        vm.selectedDate = newDate
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            vm.selectedDate = newDate
+                        }
                     } else {
-                        vm.selectedDate = newMonday
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            vm.selectedDate = newMonday
+                        }
                     }
                 }
             }
@@ -72,7 +75,6 @@ struct TimelineView: View {
 }
 
 // MARK: - One Full Week Page
-/// Each swipeable page contains: header, calendar strip, and the card/overview stack.
 struct WeekPageView: View {
     @ObservedObject var vm: DayScheduleViewModel
     let weekOffset: Int
@@ -97,40 +99,28 @@ struct WeekPageView: View {
         return vm.weekDates(for: pageMonday)
     }
     
+    /// Whether selectedDate belongs to this page's week
+    private var isCurrentPage: Bool {
+        let selectedMonday = vm.mondayOf(date: vm.selectedDate)
+        let todayMonday = vm.mondayOf(date: Date())
+        guard let pageMonday = vm.calendar.date(byAdding: .weekOfYear, value: weekOffset, to: todayMonday) else { return false }
+        return vm.calendar.isDate(selectedMonday, inSameDayAs: pageMonday)
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             
             // ═══════════════════════════════════
-            // HEADER
+            // HEADER — only shown on current page to avoid duplicate headers during swipe
             // ═══════════════════════════════════
-            HStack(alignment: .bottom, spacing: 6) {
-                if isRevealed {
-                    Text(vm.selectedDate.formatted(.dateTime.month(.wide)))
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.white)
-                        .transition(.opacity)
-                } else {
-                    Text(vm.selectedDate.formatted(.dateTime.day().month(.wide)))
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.white)
-                        .transition(.opacity)
-                }
-                
-                Text(vm.selectedDate.formatted(.dateTime.year()))
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(themePink)
-                
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(themePink)
-                    .padding(.bottom, 4)
-                
-                Spacer()
+            if isCurrentPage {
+                headerView
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else {
+                // Show the week's month/year for non-active pages
+                headerViewForPage
+                    .transition(.opacity)
             }
-            .padding(.horizontal)
-            .padding(.top, 10)
-            .padding(.bottom, 8)
-            .animation(.easeInOut(duration: 0.25), value: isRevealed)
             
             // ═══════════════════════════════════
             // CALENDAR STRIP (fixed 7-day, Mon→Sun)
@@ -143,7 +133,7 @@ struct WeekPageView: View {
             .padding(.bottom, 10)
             
             // ═══════════════════════════════════
-            // TWO-LAYER STACK: Week overview + draggable front card
+            // TWO-LAYER STACK
             // ═══════════════════════════════════
             GeometryReader { geo in
                 let totalH = geo.size.height
@@ -153,14 +143,11 @@ struct WeekPageView: View {
                 
                 ZStack(alignment: .top) {
                     
-                    // ── BACK: Week Overview (7 vertical columns) ──
                     WeekOverviewView(vm: vm, weekDates: weekDates)
                         .opacity(revealProgress > 0.05 ? 1 : 0)
-                        .animation(.easeOut(duration: 0.15), value: revealProgress > 0.05)
+                        .animation(.easeOut(duration: 0.2), value: revealProgress > 0.05)
                     
-                    // ── FRONT: Draggable day card ──
                     VStack(spacing: 0) {
-                        // Drag handle
                         Capsule()
                             .fill(Color.gray.opacity(0.5))
                             .frame(width: 40, height: 5)
@@ -192,7 +179,7 @@ struct WeekPageView: View {
                             }
                             .onEnded { value in
                                 let velocity = value.predictedEndTranslation.height
-                                withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                     if value.translation.height > 80 || velocity > 200 {
                                         revealProgress = 1
                                     } else if value.translation.height < -60 || velocity < -200 {
@@ -207,6 +194,62 @@ struct WeekPageView: View {
             }
         }
         .background(darkerBackground)
+    }
+    
+    // MARK: - Header for Active Page
+    private var headerView: some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            if isRevealed {
+                Text(vm.selectedDate.formatted(.dateTime.month(.wide)))
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.white)
+                    .transition(.opacity)
+            } else {
+                Text(vm.selectedDate.formatted(.dateTime.day().month(.wide)))
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(.white)
+                    .transition(.opacity)
+            }
+            
+            Text(vm.selectedDate.formatted(.dateTime.year()))
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(themePink)
+            
+            Image(systemName: "chevron.right")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(themePink)
+                .padding(.bottom, 4)
+            
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .animation(.easeInOut(duration: 0.25), value: isRevealed)
+    }
+    
+    // MARK: - Header for Non-Active Pages (shows that page's month)
+    private var headerViewForPage: some View {
+        let pageDate = weekDates.first ?? Date()
+        return HStack(alignment: .bottom, spacing: 6) {
+            Text(pageDate.formatted(.dateTime.month(.wide)))
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.white)
+            
+            Text(pageDate.formatted(.dateTime.year()))
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(themePink)
+            
+            Image(systemName: "chevron.right")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(themePink)
+                .padding(.bottom, 4)
+            
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
     }
     
     // MARK: - Day Timeline Content
