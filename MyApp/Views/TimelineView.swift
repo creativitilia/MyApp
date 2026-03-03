@@ -20,13 +20,24 @@ struct TimelineView: View {
     
     private var isRevealed: Bool { revealProgress > 0.5 }
     
-    /// The 7 dates of the current week, aligned with the calendar strip
+    /// The 7 dates visible in the calendar strip, respecting the device locale's firstWeekday.
+    /// This ensures column 0 = leftmost day in the strip, column 6 = rightmost.
     private var weekDates: [Date] {
         let cal = vm.calendar
-        var comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: vm.selectedDate)
-        comps.weekday = 2
-        guard let monday = cal.date(from: comps) else { return [] }
-        return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: monday) }
+        let selected = cal.startOfDay(for: vm.selectedDate)
+        
+        // Find what weekday selectedDate is (1=Sun, 2=Mon, ..., 7=Sat)
+        let selectedWeekday = cal.component(.weekday, from: selected)
+        let firstWeekday = cal.firstWeekday // Respects locale (e.g. 7=Sat, 2=Mon, 1=Sun)
+        
+        // How many days back from selected to reach the start of this week
+        var diff = selectedWeekday - firstWeekday
+        if diff < 0 { diff += 7 }
+        
+        // The first day of this week
+        guard let weekStart = cal.date(byAdding: .day, value: -diff, to: selected) else { return [] }
+        
+        return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: weekStart) }
     }
 
     var body: some View {
@@ -80,7 +91,6 @@ struct TimelineView: View {
                     GeometryReader { geo in
                         let totalH = geo.size.height
                         let collapsedCardH: CGFloat = 130
-                        // Max offset = push front card down so only the pill peeks at the bottom
                         let maxOffset = totalH - collapsedCardH
                         let currentOffset = revealProgress * maxOffset
                         
@@ -93,7 +103,6 @@ struct TimelineView: View {
                             
                             // ── FRONT CARD (draggable, collapses to pill) ──
                             VStack(spacing: 0) {
-                                // Drag handle
                                 Capsule()
                                     .fill(Color.gray.opacity(0.5))
                                     .frame(width: 40, height: 5)
@@ -101,10 +110,8 @@ struct TimelineView: View {
                                     .padding(.bottom, 8)
                                 
                                 if revealProgress < 0.85 {
-                                    // Full timeline content
                                     dayTimelineContent
                                 } else {
-                                    // Collapsed: show active task pill
                                     collapsedTaskPill
                                 }
                             }
@@ -124,10 +131,8 @@ struct TimelineView: View {
                                         let delta = value.translation.height
                                         let newProgress: CGFloat
                                         if delta > 0 {
-                                            // Dragging down
                                             newProgress = revealProgress + delta / maxOffset
                                         } else {
-                                            // Dragging up
                                             newProgress = revealProgress + delta / maxOffset
                                         }
                                         revealProgress = min(1, max(0, newProgress))
@@ -140,7 +145,6 @@ struct TimelineView: View {
                                             } else if value.translation.height < -60 || velocity < -200 {
                                                 revealProgress = 0
                                             } else {
-                                                // Snap to nearest
                                                 revealProgress = revealProgress > 0.5 ? 1 : 0
                                             }
                                         }
@@ -306,7 +310,6 @@ struct TimelineView: View {
             .padding(.vertical, 16)
             .onTapGesture { editingTask = task }
         } else {
-            // No active task — show placeholder
             Text("No upcoming tasks")
                 .font(.subheadline)
                 .foregroundColor(.gray)
