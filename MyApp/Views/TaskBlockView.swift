@@ -11,24 +11,21 @@ struct TaskBlockView: View {
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
     
     private var strokeWidth: CGFloat {
-        isEyeOverlap ? 8 : 6
+        isEyeOverlap ? 4 : 2
     }
     
-    // The actual pill capsule height
     private var pillHeight: CGFloat {
         max(height, pillWidth)
     }
     
-    // The vertical center of the pill — where text should anchor
     private var pillCenterY: CGFloat {
         pillHeight / 2
     }
     
     var body: some View {
-        // Use .top alignment so we can manually position text at pill center
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: 12) {
             
-            // 1. The Unified Pill Shape
+            // 1. The Pill
             ZStack(alignment: .center) {
                 Capsule()
                     .fill(task.isCompleted ? task.color.opacity(0.3) : task.color)
@@ -49,10 +46,19 @@ struct TaskBlockView: View {
             )
             .frame(width: pillWidth, height: pillHeight)
             
-            // 2. Text Content — anchored to the pill's vertical center
+            // 2. Text
             VStack(alignment: .leading, spacing: 3) {
                 let endTime = task.startTime.addingTimeInterval(task.duration)
-                Text("\(task.startTime.formatted(date: .omitted, time: .shortened)) - \(endTime.formatted(date: .omitted, time: .shortened)) (\(Int(task.durationMinutes)) min)")
+                let durText: String = {
+                    let mins = Int(task.durationMinutes)
+                    if mins >= 60 {
+                        let h = mins / 60
+                        let m = mins % 60
+                        return m > 0 ? "\(h) hr, \(m) min" : "\(h) hr"
+                    }
+                    return "\(mins) min"
+                }()
+                Text("\(task.startTime.formatted(date: .omitted, time: .shortened)) – \(endTime.formatted(date: .omitted, time: .shortened)) (\(durText))")
                     .font(.caption)
                     .foregroundColor(.gray)
                 
@@ -63,15 +69,12 @@ struct TaskBlockView: View {
                     .strikethrough(task.isCompleted)
                     .lineLimit(1)
             }
-            .fixedSize(horizontal: false, vertical: true) // Never compress text vertically
-            // Offset so the text block's center aligns with the pill's center.
-            // Text block is ~38pt tall (caption 14 + spacing 3 + headline 18 ≈ 35-38pt).
-            // So offset = pillCenter - (textHeight / 2)
+            .fixedSize(horizontal: false, vertical: true)
             .offset(y: pillCenterY - 19)
             
             Spacer(minLength: 0)
             
-            // 3. Completion Checkbox — also at pill center
+            // 3. Checkbox
             Button(action: onToggleComplete) {
                 Circle()
                     .strokeBorder(task.isCompleted ? task.color : task.color.opacity(0.5), lineWidth: 2)
@@ -85,7 +88,7 @@ struct TaskBlockView: View {
                     )
             }
             .padding(.trailing, 16)
-            .offset(y: pillCenterY - 13) // Center the 26pt checkbox on the pill center
+            .offset(y: pillCenterY - 13)
         }
         .frame(height: pillHeight, alignment: .top)
         .contentShape(Rectangle())
