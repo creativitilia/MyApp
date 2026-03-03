@@ -2,7 +2,6 @@ import Foundation
 import SwiftUI
 import Combine
 
-// Determines exactly where and how a task should be drawn
 struct TaskLayout {
     let task: TaskItem
     let yPos: CGFloat
@@ -50,16 +49,23 @@ final class DayScheduleViewModel: ObservableObject {
     }
     
     // MARK: - Week Dates (Single Source of Truth)
-    /// Returns the 7 dates of the week containing `date`,
-    /// starting from Monday (ISO standard, matching Structured app).
+    /// Returns Mon→Sun for the week containing `date`.
+    /// This is used by BOTH the calendar strip AND the week overview columns.
     func weekDates(for date: Date) -> [Date] {
         let target = calendar.startOfDay(for: date)
-        // weekday: 1=Sun, 2=Mon, ..., 7=Sat
         let wd = calendar.component(.weekday, from: target)
-        // Days back to Monday: Mon(2)→0, Tue(3)→1, Wed(4)→2, ..., Sun(1)→6
+        // weekday: 1=Sun,2=Mon,...,7=Sat → days back to Monday
         let daysBackToMonday = (wd + 5) % 7
         guard let monday = calendar.date(byAdding: .day, value: -daysBackToMonday, to: target) else { return [] }
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: monday) }
+    }
+    
+    /// The Monday of the week containing `date`
+    func mondayOf(date: Date) -> Date {
+        let target = calendar.startOfDay(for: date)
+        let wd = calendar.component(.weekday, from: target)
+        let daysBack = (wd + 5) % 7
+        return calendar.date(byAdding: .day, value: -daysBack, to: target) ?? target
     }
     
     // MARK: - THE OVERLAP ENGINE
@@ -108,14 +114,9 @@ final class DayScheduleViewModel: ObservableObject {
             let displayH = h
             
             layouts.append(TaskLayout(
-                task: task,
-                yPos: y,
-                height: h,
-                displayHeight: displayH,
-                zIndex: z,
-                showOverlapWarning: showWarning,
-                warningYPos: warnY,
-                isEyeOverlap: isEye
+                task: task, yPos: y, height: h, displayHeight: displayH,
+                zIndex: z, showOverlapWarning: showWarning,
+                warningYPos: warnY, isEyeOverlap: isEye
             ))
             
             prevEffectiveY = y

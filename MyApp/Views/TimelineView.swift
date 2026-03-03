@@ -2,156 +2,66 @@ import SwiftUI
 
 struct TimelineView: View {
     @StateObject private var vm = DayScheduleViewModel()
-
     @State private var showingAdd = false
     @State private var editingTask: TaskItem?
     
-    /// 0 = front card fully covers. 1 = fully revealed (collapsed to bottom pill).
-    @State private var revealProgress: CGFloat = 0
+    /// Which week page we're on, as an offset from "this week" (0 = current week)
+    @State private var currentWeekOffset: Int = 0
     
-    // Theme colors
+    // Provide a range of weeks the user can swipe through
+    private let weekRange = -52...52 // ±1 year
+    
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
     let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
     let themePink = Color(red: 1.0, green: 0.54, blue: 0.54)
-    
-    private var lineX: CGFloat {
-        vm.timeColumnWidth + 10 + 22 - 0.75
-    }
-    
-    private var isRevealed: Bool { revealProgress > 0.5 }
-    
-    /// Uses the ViewModel's single source of truth for week dates.
-    private var weekDates: [Date] {
-        vm.weekDates(for: vm.selectedDate)
-    }
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottomTrailing) {
-                
-                VStack(spacing: 0) {
-                    
-                    // ═══════════════════════════════════
-                    // SHARED HEADER
-                    // ═══════════════════════════════════
-                    HStack(alignment: .bottom, spacing: 6) {
-                        if isRevealed {
-                            Text(vm.selectedDate.formatted(.dateTime.month(.wide)))
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                                .transition(.opacity)
-                        } else {
-                            Text(vm.selectedDate.formatted(.dateTime.day().month(.wide)))
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                                .transition(.opacity)
-                        }
-                        
-                        Text(vm.selectedDate.formatted(.dateTime.year()))
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(themePink)
-                        
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(themePink)
-                            .padding(.bottom, 4)
-                        
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 10)
-                    .padding(.bottom, 8)
-                    .animation(.easeInOut(duration: 0.25), value: isRevealed)
-                    
-                    // ══════���════════════════════════════
-                    // FIXED 7-DAY CALENDAR STRIP
-                    // ═══════════════════════════════════
-                    HorizontalCalendarView(selectedDate: $vm.selectedDate, vm: vm)
-                        .padding(.bottom, 10)
-                    
-                    // ═══════════════════════════════════
-                    // TWO-PAGE STACK
-                    // ═══════════════════════════════════
-                    GeometryReader { geo in
-                        let totalH = geo.size.height
-                        let collapsedCardH: CGFloat = 130
-                        let maxOffset = totalH - collapsedCardH
-                        let currentOffset = revealProgress * maxOffset
-                        
-                        ZStack(alignment: .top) {
-                            
-                            // ── BACK PAGE: Week Overview ──
-                            WeekOverviewView(vm: vm, weekDates: weekDates)
-                                .opacity(revealProgress > 0.05 ? 1 : 0)
-                                .animation(.easeOut(duration: 0.15), value: revealProgress > 0.05)
-                            
-                            // ── FRONT CARD ──
-                            VStack(spacing: 0) {
-                                Capsule()
-                                    .fill(Color.gray.opacity(0.5))
-                                    .frame(width: 40, height: 5)
-                                    .padding(.top, 10)
-                                    .padding(.bottom, 8)
-                                
-                                if revealProgress < 0.85 {
-                                    dayTimelineContent
-                                } else {
-                                    collapsedTaskPill
-                                }
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(darkBackground)
-                            .clipShape(
-                                RoundedRectangle(cornerRadius: revealProgress > 0.02 ? 20 : 0)
-                            )
-                            .shadow(
-                                color: .black.opacity(revealProgress > 0.02 ? 0.5 : 0),
-                                radius: 20, y: -5
-                            )
-                            .offset(y: currentOffset)
-                            .gesture(
-                                DragGesture(minimumDistance: 8)
-                                    .onChanged { value in
-                                        let delta = value.translation.height
-                                        let newProgress = revealProgress + delta / maxOffset
-                                        revealProgress = min(1, max(0, newProgress))
-                                    }
-                                    .onEnded { value in
-                                        let velocity = value.predictedEndTranslation.height
-                                        withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
-                                            if value.translation.height > 80 || velocity > 200 {
-                                                revealProgress = 1
-                                            } else if value.translation.height < -60 || velocity < -200 {
-                                                revealProgress = 0
-                                            } else {
-                                                revealProgress = revealProgress > 0.5 ? 1 : 0
-                                            }
-                                        }
-                                    }
-                            )
-                        }
-                    }
+        ZStack(alignment: .bottomTrailing) {
+            TabView(selection: $currentWeekOffset) {
+                ForEach(weekRange, id: \.self) { offset in
+                    WeekPageView(
+                        vm: vm,
+                        weekOffset: offset,
+                        showingAdd: $showingAdd,
+                        editingTask: $editingTask
+                    )
+                    .tag(offset)
                 }
-                .background(darkerBackground.ignoresSafeArea())
-                
-                // ═══════════════════════════════════
-                // "+" BUTTON
-                // ═══════════════════════════════════
-                Button(action: { showingAdd = true }) {
-                    Image(systemName: "plus")
-                        .font(.title2.weight(.bold))
-                        .foregroundColor(.white)
-                        .frame(width: 60, height: 60)
-                        .background(themePink)
-                        .clipShape(Circle())
-                        .shadow(color: themePink.opacity(0.4), radius: 8, x: 0, y: 4)
-                }
-                .padding(.trailing, 20)
-                .padding(.bottom, 30)
-                .zIndex(999)
             }
-            .preferredColorScheme(.dark)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .background(darkerBackground.ignoresSafeArea())
+            .onChange(of: currentWeekOffset) { _, newOffset in
+                // When swiping to a new week, update selectedDate to Monday of that week
+                // (or keep the same weekday if possible)
+                let today = Date()
+                let todayMonday = vm.mondayOf(date: today)
+                if let newMonday = vm.calendar.date(byAdding: .weekOfYear, value: newOffset, to: todayMonday) {
+                    // Keep the same weekday position the user had selected
+                    let currentWeekday = vm.calendar.component(.weekday, from: vm.selectedDate)
+                    let wdOffset = (currentWeekday + 5) % 7 // 0=Mon,...,6=Sun
+                    if let newDate = vm.calendar.date(byAdding: .day, value: wdOffset, to: newMonday) {
+                        vm.selectedDate = newDate
+                    } else {
+                        vm.selectedDate = newMonday
+                    }
+                }
+            }
+            
+            // "+" BUTTON — always on top
+            Button(action: { showingAdd = true }) {
+                Image(systemName: "plus")
+                    .font(.title2.weight(.bold))
+                    .foregroundColor(.white)
+                    .frame(width: 60, height: 60)
+                    .background(themePink)
+                    .clipShape(Circle())
+                    .shadow(color: themePink.opacity(0.4), radius: 8, x: 0, y: 4)
+            }
+            .padding(.trailing, 20)
+            .padding(.bottom, 30)
+            .zIndex(999)
         }
+        .preferredColorScheme(.dark)
         .sheet(isPresented: $showingAdd) {
             AddEditTaskView(viewModel: vm)
         }
@@ -159,8 +69,147 @@ struct TimelineView: View {
             AddEditTaskView(viewModel: vm, taskToEdit: task)
         }
     }
+}
+
+// MARK: - One Full Week Page
+/// Each swipeable page contains: header, calendar strip, and the card/overview stack.
+struct WeekPageView: View {
+    @ObservedObject var vm: DayScheduleViewModel
+    let weekOffset: Int
+    @Binding var showingAdd: Bool
+    @Binding var editingTask: TaskItem?
     
-    // MARK: - Day Timeline
+    @State private var revealProgress: CGFloat = 0
+    
+    let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
+    let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
+    let themePink = Color(red: 1.0, green: 0.54, blue: 0.54)
+    
+    private var lineX: CGFloat {
+        vm.timeColumnWidth + 10 + 22 - 0.75
+    }
+    private var isRevealed: Bool { revealProgress > 0.5 }
+    
+    /// The 7 dates (Mon→Sun) for THIS week page
+    private var weekDates: [Date] {
+        let todayMonday = vm.mondayOf(date: Date())
+        guard let pageMonday = vm.calendar.date(byAdding: .weekOfYear, value: weekOffset, to: todayMonday) else { return [] }
+        return vm.weekDates(for: pageMonday)
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            
+            // ═══════════════════════════════════
+            // HEADER
+            // ═══════════════════════════════════
+            HStack(alignment: .bottom, spacing: 6) {
+                if isRevealed {
+                    Text(vm.selectedDate.formatted(.dateTime.month(.wide)))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                        .transition(.opacity)
+                } else {
+                    Text(vm.selectedDate.formatted(.dateTime.day().month(.wide)))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.white)
+                        .transition(.opacity)
+                }
+                
+                Text(vm.selectedDate.formatted(.dateTime.year()))
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundColor(themePink)
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(themePink)
+                    .padding(.bottom, 4)
+                
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+            .animation(.easeInOut(duration: 0.25), value: isRevealed)
+            
+            // ═══════════════════════════════════
+            // CALENDAR STRIP (fixed 7-day, Mon→Sun)
+            // ═══════════════════════════════════
+            HorizontalCalendarView(
+                selectedDate: $vm.selectedDate,
+                vm: vm,
+                weekDates: weekDates
+            )
+            .padding(.bottom, 10)
+            
+            // ═══════════════════════════════════
+            // TWO-LAYER STACK: Week overview + draggable front card
+            // ═══════════════════════════════════
+            GeometryReader { geo in
+                let totalH = geo.size.height
+                let collapsedCardH: CGFloat = 130
+                let maxOffset = totalH - collapsedCardH
+                let currentOffset = revealProgress * maxOffset
+                
+                ZStack(alignment: .top) {
+                    
+                    // ── BACK: Week Overview (7 vertical columns) ──
+                    WeekOverviewView(vm: vm, weekDates: weekDates)
+                        .opacity(revealProgress > 0.05 ? 1 : 0)
+                        .animation(.easeOut(duration: 0.15), value: revealProgress > 0.05)
+                    
+                    // ── FRONT: Draggable day card ──
+                    VStack(spacing: 0) {
+                        // Drag handle
+                        Capsule()
+                            .fill(Color.gray.opacity(0.5))
+                            .frame(width: 40, height: 5)
+                            .padding(.top, 10)
+                            .padding(.bottom, 8)
+                        
+                        if revealProgress < 0.85 {
+                            dayTimelineContent
+                        } else {
+                            collapsedTaskPill
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(darkBackground)
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: revealProgress > 0.02 ? 20 : 0)
+                    )
+                    .shadow(
+                        color: .black.opacity(revealProgress > 0.02 ? 0.5 : 0),
+                        radius: 20, y: -5
+                    )
+                    .offset(y: currentOffset)
+                    .gesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { value in
+                                let delta = value.translation.height
+                                let newProgress = revealProgress + delta / maxOffset
+                                revealProgress = min(1, max(0, newProgress))
+                            }
+                            .onEnded { value in
+                                let velocity = value.predictedEndTranslation.height
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                                    if value.translation.height > 80 || velocity > 200 {
+                                        revealProgress = 1
+                                    } else if value.translation.height < -60 || velocity < -200 {
+                                        revealProgress = 0
+                                    } else {
+                                        revealProgress = revealProgress > 0.5 ? 1 : 0
+                                    }
+                                }
+                            }
+                    )
+                }
+            }
+        }
+        .background(darkerBackground)
+    }
+    
+    // MARK: - Day Timeline Content
     private var dayTimelineContent: some View {
         ScrollViewReader { scrollProxy in
             ScrollView(.vertical, showsIndicators: false) {
