@@ -2,34 +2,41 @@ import SwiftUI
 
 struct HorizontalCalendarView: View {
     @Binding var selectedDate: Date
-    // We pass the view model in so we can check if days have tasks
     @ObservedObject var vm: DayScheduleViewModel
     let calendar = Calendar.current
     
-    // Theme colors matching inspiration
-    let themePink = Color(red: 1.0, green: 0.54, blue: 0.54) // Coral pink
+    let themePink = Color(red: 1.0, green: 0.54, blue: 0.54)
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
     
-    // Generate an array of dates (-14 days to +14 days from today)
+    // Full scrollable range
     var dates: [Date] {
         let today = calendar.startOfDay(for: Date())
         return (-14...14).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
     }
     
+    /// The 7 dates (Mon–Sun) of the week containing selectedDate.
+    /// Exposed so other views can align columns with this strip.
+    var visibleWeekDates: [Date] {
+        let cal = calendar
+        // Find the Monday of selectedDate's week (ISO: Monday = weekday 2)
+        var comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedDate)
+        comps.weekday = 2
+        guard let monday = cal.date(from: comps) else { return [] }
+        return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: monday) }
+    }
+    
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) { // Tighter spacing
+                HStack(spacing: 16) {
                     ForEach(dates, id: \.self) { date in
                         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
                         
                         VStack(spacing: 8) {
-                            // Day of the week (Mon, Tue)
                             Text(date.formatted(.dateTime.weekday(.abbreviated)))
                                 .font(.caption2)
                                 .foregroundColor(isSelected ? .white : .gray)
                             
-                            // Date Number (1, 23, 24)
                             Text(date.formatted(.dateTime.day()))
                                 .font(.title3.weight(isSelected ? .bold : .medium))
                                 .foregroundColor(isSelected ? .white : .primary)
@@ -39,12 +46,9 @@ struct HorizontalCalendarView: View {
                                         .fill(isSelected ? themePink : Color.clear)
                                 )
                             
-                            // Task indicators underneath (dots or tiny icons)
-                            // We check if there are tasks for this specific date
                             let tasksForDay = vm.tasksFor(date: date)
                             if !tasksForDay.isEmpty {
                                 HStack(spacing: 2) {
-                                    // Just showing up to 2 tiny icons to match inspiration
                                     ForEach(tasksForDay.prefix(2)) { task in
                                         Circle()
                                             .fill(task.color)
@@ -53,7 +57,6 @@ struct HorizontalCalendarView: View {
                                 }
                                 .frame(height: 10)
                             } else {
-                                // Spacer to keep height consistent
                                 Spacer().frame(height: 10)
                             }
                         }

@@ -6,8 +6,8 @@ struct TimelineView: View {
     @State private var showingAdd = false
     @State private var editingTask: TaskItem?
     
-    /// How far the front card has slid down (0 = fully covering)
-    @State private var cardOffset: CGFloat = 0
+    /// 0 = front card fully covers. 1 = fully revealed (collapsed to bottom pill).
+    @State private var revealProgress: CGFloat = 0
     
     // Theme colors
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
@@ -18,21 +18,28 @@ struct TimelineView: View {
         vm.timeColumnWidth + 10 + 22 - 0.75
     }
     
-    /// Whether the back page (week overview) is currently revealed
-    private var isRevealed: Bool { cardOffset > 100 }
+    private var isRevealed: Bool { revealProgress > 0.5 }
+    
+    /// The 7 dates of the current week, aligned with the calendar strip
+    private var weekDates: [Date] {
+        let cal = vm.calendar
+        var comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: vm.selectedDate)
+        comps.weekday = 2
+        guard let monday = cal.date(from: comps) else { return [] }
+        return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: monday) }
+    }
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
                 
-                // ── MAIN CONTENT ──
+                // ── MAIN LAYOUT ──
                 VStack(spacing: 0) {
                     
-                    // ═══════════════════════════════════════════
-                    // SHARED HEADER — pinned, never moves
-                    // ═══════════════════════════════════════════
+                    // ═══════════════════════════════════
+                    // SHARED HEADER — pinned at top
+                    // ═══════════════════════════════════
                     HStack(alignment: .bottom, spacing: 6) {
-                        // Animate between "3 March" and "March" based on reveal state
                         if isRevealed {
                             Text(vm.selectedDate.formatted(.dateTime.month(.wide)))
                                 .font(.system(size: 28, weight: .bold))
@@ -61,35 +68,30 @@ struct TimelineView: View {
                     .padding(.bottom, 8)
                     .animation(.easeInOut(duration: 0.25), value: isRevealed)
                     
-                    // ═══════════════════════════════════════════
-                    // SHARED CALENDAR STRIP — pinned, never moves
-                    // ═══════════════════════════════════════════
+                    // ═══════════════════════════════════
+                    // SHARED CALENDAR STRIP — pinned
+                    // ═══════════════════════════════════
                     HorizontalCalendarView(selectedDate: $vm.selectedDate, vm: vm)
-                        .padding(.bottom, 15)
+                        .padding(.bottom, 10)
                     
-                    // ═══════════════════════════════════════════
+                    // ═══════════════════════════════════
                     // TWO-PAGE STACK
-                    // Back: Week overview (always rendered)
-                    // Front: Day timeline card (slides down)
-                    // ═══════════════════════════════════════════
+                    // ═══════════════════════════════════
                     GeometryReader { geo in
-                        let maxOffset = geo.size.height * 0.7
+                        let totalH = geo.size.height
+                        let collapsedCardH: CGFloat = 130
+                        // Max offset = push front card down so only the pill peeks at the bottom
+                        let maxOffset = totalH - collapsedCardH
+                        let currentOffset = revealProgress * maxOffset
                         
                         ZStack(alignment: .top) {
                             
-                            // ── BACK PAGE ──
-                            VStack(spacing: 0) {
-                                WeekOverviewView(vm: vm)
-                                
-                                Spacer(minLength: 0)
-                                
-                                activeTaskCard
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .opacity(cardOffset > 10 ? 1 : 0)
-                            .animation(.easeOut(duration: 0.2), value: cardOffset > 10)
+                            // ── BACK PAGE: Week Overview ──
+                            WeekOverviewView(vm: vm, weekDates: weekDates)
+                                .opacity(revealProgress > 0.05 ? 1 : 0)
+                                .animation(.easeOut(duration: 0.15), value: revealProgress > 0.05)
                             
-                            // ── FRONT CARD (draggable) ──
+                            // ── FRONT CARD (draggable, collapses to pill) ──
                             VStack(spacing: 0) {
                                 // Drag handle
                                 Capsule()
@@ -98,38 +100,48 @@ struct TimelineView: View {
                                     .padding(.top, 10)
                                     .padding(.bottom, 8)
                                 
-                                // Scrollable day timeline
-                                dayTimelineContent
+                                if revealProgress < 0.85 {
+                                    // Full timeline content
+                                    dayTimelineContent
+                                } else {
+                                    // Collapsed: show active task pill
+                                    collapsedTaskPill
+                                }
                             }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(darkBackground)
                             .clipShape(
-                                RoundedRectangle(cornerRadius: cardOffset > 5 ? 20 : 0)
+                                RoundedRectangle(cornerRadius: revealProgress > 0.02 ? 20 : 0)
                             )
                             .shadow(
-                                color: .black.opacity(cardOffset > 5 ? 0.5 : 0),
+                                color: .black.opacity(revealProgress > 0.02 ? 0.5 : 0),
                                 radius: 20, y: -5
                             )
-                            .offset(y: cardOffset)
+                            .offset(y: currentOffset)
                             .gesture(
                                 DragGesture(minimumDistance: 8)
                                     .onChanged { value in
-                                        let t = value.translation.height
-                                        if cardOffset == 0 && t > 0 {
-                                            // Pulling down from closed
-                                            cardOffset = t
-                                        } else if cardOffset > 0 {
-                                            // Already open or mid-drag
-                                            let newOffset = cardOffset + (t > 0 ? t * 0.5 : t)
-                                            cardOffset = max(0, min(newOffset, maxOffset))
+                                        let delta = value.translation.height
+                                        let newProgress: CGFloat
+                                        if delta > 0 {
+                                            // Dragging down
+                                            newProgress = revealProgress + delta / maxOffset
+                                        } else {
+                                            // Dragging up
+                                            newProgress = revealProgress + delta / maxOffset
                                         }
+                                        revealProgress = min(1, max(0, newProgress))
                                     }
                                     .onEnded { value in
-                                        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
-                                            if value.translation.height > 120
-                                                || value.predictedEndTranslation.height > 250 {
-                                                cardOffset = maxOffset
+                                        let velocity = value.predictedEndTranslation.height
+                                        withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                                            if value.translation.height > 80 || velocity > 200 {
+                                                revealProgress = 1
+                                            } else if value.translation.height < -60 || velocity < -200 {
+                                                revealProgress = 0
                                             } else {
-                                                cardOffset = 0
+                                                // Snap to nearest
+                                                revealProgress = revealProgress > 0.5 ? 1 : 0
                                             }
                                         }
                                     }
@@ -139,9 +151,9 @@ struct TimelineView: View {
                 }
                 .background(darkerBackground.ignoresSafeArea())
                 
-                // ═══════════════════════════════════════════
-                // FIX #3: "+" BUTTON — global overlay, always visible
-                // ═══════════════════════════════════════════
+                // ═══════════════════════════════════
+                // "+" BUTTON — always visible
+                // ═══════════════════════════════════
                 Button(action: { showingAdd = true }) {
                     Image(systemName: "plus")
                         .font(.title2.weight(.bold))
@@ -165,12 +177,11 @@ struct TimelineView: View {
         }
     }
     
-    // MARK: - Day Timeline (front card body)
+    // MARK: - Day Timeline (full front card content)
     private var dayTimelineContent: some View {
         ScrollViewReader { scrollProxy in
             ScrollView(.vertical, showsIndicators: false) {
                 ZStack(alignment: .topLeading) {
-                    // INVISIBLE HOUR ANCHORS
                     VStack(spacing: 0) {
                         ForEach(0..<24, id: \.self) { hour in
                             Color.clear
@@ -179,10 +190,8 @@ struct TimelineView: View {
                         }
                     }
                     
-                    // A. Time Labels
                     TimeColumnView(vm: vm)
                     
-                    // B. Base dashed line
                     Path { path in
                         path.move(to: CGPoint(x: 0, y: 0))
                         path.addLine(to: CGPoint(x: 0, y: vm.timelineHeight()))
@@ -190,7 +199,6 @@ struct TimelineView: View {
                     .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
                     .offset(x: lineX)
                     
-                    // Colored segments
                     ForEach(vm.layoutAttributes, id: \.task.id) { layout in
                         Path { path in
                             path.move(to: CGPoint(x: 0, y: layout.yPos))
@@ -201,7 +209,6 @@ struct TimelineView: View {
                         .zIndex(-1)
                     }
                     
-                    // C. Current Time
                     if vm.calendar.isDate(vm.selectedDate, inSameDayAs: Date()) {
                         let currentY = vm.yPosition(for: vm.currentTime)
                         Text(vm.currentTime.formatted(date: .omitted, time: .shortened))
@@ -213,7 +220,6 @@ struct TimelineView: View {
                             .zIndex(50)
                     }
                     
-                    // D. Task Layouts
                     ForEach(vm.layoutAttributes, id: \.task.id) { layout in
                         if layout.showOverlapWarning {
                             HStack(spacing: 0) {
@@ -250,9 +256,9 @@ struct TimelineView: View {
         }
     }
     
-    // MARK: - Active Task Card (bottom of back page)
+    // MARK: - Collapsed Task Pill (front card when fully revealed)
     @ViewBuilder
-    private var activeTaskCard: some View {
+    private var collapsedTaskPill: some View {
         let now = Date()
         let active = vm.tasks
             .filter { !$0.isCompleted }
@@ -263,55 +269,51 @@ struct TimelineView: View {
             }
         
         if let task = active {
-            VStack(spacing: 0) {
-                Capsule()
-                    .fill(Color.gray.opacity(0.5))
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 12)
-                    .padding(.bottom, 14)
-                
-                HStack(spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(task.color.opacity(0.2))
-                            .frame(width: 52, height: 52)
-                        Image(systemName: task.icon ?? "doc.text.fill")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(task.color)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 3) {
-                        let endTime = task.startTime.addingTimeInterval(task.duration)
-                        if task.startTime <= now {
-                            let rem = max(0, Int(endTime.timeIntervalSince(now) / 60))
-                            Text("\(rem)m remaining")
-                                .font(.caption).foregroundColor(.gray)
-                        } else {
-                            Text(task.startTime.formatted(date: .omitted, time: .shortened))
-                                .font(.caption).foregroundColor(.gray)
-                        }
-                        Text(task.title)
-                            .font(.headline.weight(.bold))
-                            .foregroundColor(.white)
-                    }
-                    
-                    Spacer()
-                    
-                    Button(action: { vm.toggleCompletion(for: task) }) {
-                        Circle()
-                            .strokeBorder(task.color.opacity(0.5), lineWidth: 2)
-                            .frame(width: 28, height: 28)
-                    }
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(task.color.opacity(0.2))
+                        .frame(width: 48, height: 48)
+                    Image(systemName: task.icon ?? "doc.text.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(task.color)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    let endTime = task.startTime.addingTimeInterval(task.duration)
+                    if task.startTime <= now {
+                        let rem = max(0, Int(endTime.timeIntervalSince(now) / 60))
+                        Text("\(rem)m remaining")
+                            .font(.caption).foregroundColor(.gray)
+                    } else {
+                        Text(task.startTime.formatted(date: .omitted, time: .shortened))
+                            .font(.caption).foregroundColor(.gray)
+                    }
+                    Text(task.title)
+                        .font(.headline.weight(.bold))
+                        .foregroundColor(.white)
+                }
+                
+                Spacer()
+                
+                Button(action: { vm.toggleCompletion(for: task) }) {
+                    Circle()
+                        .strokeBorder(task.color.opacity(0.5), lineWidth: 2)
+                        .frame(width: 28, height: 28)
+                }
             }
-            .background(Color(red: 0.12, green: 0.12, blue: 0.14))
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
             .onTapGesture { editingTask = task }
+        } else {
+            // No active task — show placeholder
+            Text("No upcoming tasks")
+                .font(.subheadline)
+                .foregroundColor(.gray)
+                .padding(.vertical, 20)
         }
+        
+        Spacer(minLength: 0)
     }
     
     // MARK: - Scroll Helper
