@@ -20,19 +20,9 @@ struct TimelineView: View {
     
     private var isRevealed: Bool { revealProgress > 0.5 }
     
-    /// The 7 dates of the current week — SAME logic as HorizontalCalendarView.
-    /// This guarantees column N in WeekOverviewView = date N in the calendar strip.
+    /// Uses the ViewModel's single source of truth for week dates.
     private var weekDates: [Date] {
-        let cal = vm.calendar
-        let selected = cal.startOfDay(for: vm.selectedDate)
-        let selectedWeekday = cal.component(.weekday, from: selected)
-        let firstWeekday = cal.firstWeekday
-        
-        var diff = selectedWeekday - firstWeekday
-        if diff < 0 { diff += 7 }
-        
-        guard let weekStart = cal.date(byAdding: .day, value: -diff, to: selected) else { return [] }
-        return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: weekStart) }
+        vm.weekDates(for: vm.selectedDate)
     }
 
     var body: some View {
@@ -73,7 +63,7 @@ struct TimelineView: View {
                     .padding(.bottom, 8)
                     .animation(.easeInOut(duration: 0.25), value: isRevealed)
                     
-                    // ═══════════════════════════════════
+                    // ══════���════════════════════════════
                     // FIXED 7-DAY CALENDAR STRIP
                     // ═══════════════════════════════════
                     HorizontalCalendarView(selectedDate: $vm.selectedDate, vm: vm)

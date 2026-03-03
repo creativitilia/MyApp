@@ -5,9 +5,9 @@ import Combine
 // Determines exactly where and how a task should be drawn
 struct TaskLayout {
     let task: TaskItem
-    let yPos: CGFloat           // Top edge of where this task row starts
-    let height: CGFloat         // The capsule pill height (visual)
-    let displayHeight: CGFloat  // The full row height (pill + text breathing room)
+    let yPos: CGFloat
+    let height: CGFloat
+    let displayHeight: CGFloat
     let zIndex: Double
     let showOverlapWarning: Bool
     let warningYPos: CGFloat
@@ -49,6 +49,19 @@ final class DayScheduleViewModel: ObservableObject {
         allTasks.filter { calendar.isDate($0.startTime, inSameDayAs: date) }
     }
     
+    // MARK: - Week Dates (Single Source of Truth)
+    /// Returns the 7 dates of the week containing `date`,
+    /// starting from Monday (ISO standard, matching Structured app).
+    func weekDates(for date: Date) -> [Date] {
+        let target = calendar.startOfDay(for: date)
+        // weekday: 1=Sun, 2=Mon, ..., 7=Sat
+        let wd = calendar.component(.weekday, from: target)
+        // Days back to Monday: Mon(2)→0, Tue(3)→1, Wed(4)→2, ..., Sun(1)→6
+        let daysBackToMonday = (wd + 5) % 7
+        guard let monday = calendar.date(byAdding: .day, value: -daysBackToMonday, to: target) else { return [] }
+        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: monday) }
+    }
+    
     // MARK: - THE OVERLAP ENGINE
     var layoutAttributes: [TaskLayout] {
         var layouts = [TaskLayout]()
@@ -76,20 +89,14 @@ final class DayScheduleViewModel: ObservableObject {
                     showWarning = true
                     
                     if overlapMinutes >= 10 {
-                        // ── EYE EFFECT ──
                         isEye = true
-                        
                         let prevBottom = prevEffectiveY + prevEffectiveHeight
                         y = prevBottom - pillWidth
                         y = max(y, naturalY)
-                        
-                        // Warning Y: place it at the eye junction center
                         warnY = y + (pillWidth / 2) - 8
                     } else {
-                        // ── MINOR OVERLAP (<10 min) ──
                         isEye = false
                         y = naturalY
-                        
                         let prevCenter = prevEffectiveY + (prevEffectiveHeight / 2)
                         let currentCenter = y + (h / 2)
                         warnY = ((prevCenter + currentCenter) / 2) - 8
@@ -97,16 +104,7 @@ final class DayScheduleViewModel: ObservableObject {
                 }
             }
             
-            let z: Double
-            if isEye {
-                z = Double(index)
-            } else {
-                z = Double(-index)
-            }
-            
-            // Display height: the visual row height.
-            // For the pill itself h may be small, but the text needs space.
-            // We use the pill height (h) as-is — the text alignment fix is in the View.
+            let z: Double = isEye ? Double(index) : Double(-index)
             let displayH = h
             
             layouts.append(TaskLayout(
