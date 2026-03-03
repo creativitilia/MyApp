@@ -1,51 +1,30 @@
 import SwiftUI
 
 /// The "back page" week overview.
-/// Renders 7 columns directly aligned with the HorizontalCalendarView strip above.
+/// 7 columns directly under the calendar strip — no hour labels, full-width aligned.
 struct WeekOverviewView: View {
     @ObservedObject var vm: DayScheduleViewModel
-    /// The exact 7 dates currently shown in the calendar strip
     let weekDates: [Date]
     
-    // Layout
-    private let hourLabelWidth: CGFloat = 32
-    private let hourHeight: CGFloat = 44
-    private let startHour: Int = 6
-    private let endHour: Int = 23
     private let miniPillSize: CGFloat = 40
     
-    private var totalHours: Int { endHour - startHour }
-    private var gridHeight: CGFloat { CGFloat(totalHours) * hourHeight }
-    
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 0) {
-                // Hour labels on the far left
-                VStack(spacing: 0) {
-                    ForEach(startHour..<endHour, id: \.self) { hour in
-                        Text(String(format: "%02d", hour) + "\u{2070}\u{2070}")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundColor(.gray.opacity(0.35))
-                            .frame(height: hourHeight, alignment: .top)
-                            .frame(width: hourLabelWidth, alignment: .trailing)
-                    }
-                }
-                .padding(.trailing, 2)
-                
-                // 7 day columns — each takes equal width
+        GeometryReader { geo in
+            let totalHeight = geo.size.height
+            let columnWidth = geo.size.width / CGFloat(max(weekDates.count, 1))
+            
+            HStack(spacing: 0) {
                 ForEach(Array(weekDates.enumerated()), id: \.offset) { _, date in
-                    dayColumn(for: date)
-                        .frame(maxWidth: .infinity)
+                    dayColumn(for: date, totalHeight: totalHeight)
+                        .frame(width: columnWidth, height: totalHeight)
                 }
             }
-            .padding(.horizontal, 4)
         }
-        .frame(height: gridHeight)
     }
     
     // MARK: - Day Column
     @ViewBuilder
-    private func dayColumn(for date: Date) -> some View {
+    private func dayColumn(for date: Date, totalHeight: CGFloat) -> some View {
         let isSelected = vm.calendar.isDate(date, inSameDayAs: vm.selectedDate)
         let dayTasks = vm.tasksFor(date: date).sorted { $0.startTime < $1.startTime }
         
@@ -54,25 +33,26 @@ struct WeekOverviewView: View {
             
             ZStack(alignment: .top) {
                 
-                // Baseline line — always visible
+                // ── BASELINE LINE — always visible on every column ──
                 Path { p in
                     p.move(to: CGPoint(x: centerX, y: 0))
-                    p.addLine(to: CGPoint(x: centerX, y: gridHeight))
+                    p.addLine(to: CGPoint(x: centerX, y: totalHeight))
                 }
                 .stroke(
-                    Color.gray.opacity(isSelected ? 0.25 : 0.12),
+                    Color.gray.opacity(isSelected ? 0.3 : 0.15),
                     lineWidth: 1
                 )
                 
                 if !dayTasks.isEmpty {
-                    // Gradient connecting lines between consecutive tasks
+                    
+                    // ── GRADIENT LINES between consecutive tasks ──
                     if dayTasks.count >= 2 {
                         ForEach(0..<dayTasks.count - 1, id: \.self) { i in
                             let task = dayTasks[i]
                             let nextTask = dayTasks[i + 1]
                             
-                            let y1 = yFor(task.startTime) + pillH(for: task)
-                            let y2 = yFor(nextTask.startTime)
+                            let y1 = yFor(task.startTime, totalHeight: totalHeight) + pillH(for: task, totalHeight: totalHeight)
+                            let y2 = yFor(nextTask.startTime, totalHeight: totalHeight)
                             
                             if y2 > y1 {
                                 let c1 = isSelected ? task.color : task.color.opacity(0.2)
@@ -84,38 +64,36 @@ struct WeekOverviewView: View {
                                 }
                                 .stroke(
                                     LinearGradient(colors: [c1, c2], startPoint: .top, endPoint: .bottom),
-                                    lineWidth: isSelected ? 2.5 : 1.5
+                                    lineWidth: isSelected ? 3 : 1.5
                                 )
                             }
                         }
                     }
                     
-                    // Solid colored line through each task's own duration
+                    // ── SOLID LINE through each task's duration ──
                     ForEach(dayTasks) { task in
-                        let y = yFor(task.startTime)
-                        let h = pillH(for: task)
+                        let y = yFor(task.startTime, totalHeight: totalHeight)
+                        let h = pillH(for: task, totalHeight: totalHeight)
                         let c = isSelected ? task.color : task.color.opacity(0.2)
                         
                         Path { p in
                             p.move(to: CGPoint(x: centerX, y: y))
                             p.addLine(to: CGPoint(x: centerX, y: y + h))
                         }
-                        .stroke(c, lineWidth: isSelected ? 2.5 : 1.5)
+                        .stroke(c, lineWidth: isSelected ? 3 : 1.5)
                     }
                     
-                    // Mini pill icons
+                    // ── MINI PILL ICONS ──
                     ForEach(dayTasks) { task in
-                        let y = yFor(task.startTime)
-                        let h = pillH(for: task)
+                        let y = yFor(task.startTime, totalHeight: totalHeight)
+                        let h = pillH(for: task, totalHeight: totalHeight)
                         
                         miniPill(task: task, isSelected: isSelected, height: h)
                             .position(x: centerX, y: y + h / 2)
                     }
                 }
             }
-            .frame(height: gridHeight)
         }
-        .frame(height: gridHeight)
     }
     
     // MARK: - Mini Pill
@@ -142,16 +120,22 @@ struct WeekOverviewView: View {
     }
     
     // MARK: - Helpers
-    private func yFor(_ date: Date) -> CGFloat {
+    
+    /// Map time-of-day to Y position using full available height.
+    /// 00:00 = 0, 23:59 = totalHeight
+    private func yFor(_ date: Date, totalHeight: CGFloat) -> CGFloat {
         let comps = vm.calendar.dateComponents([.hour, .minute], from: date)
         let h = comps.hour ?? 0
         let m = comps.minute ?? 0
-        let minsSinceStart = CGFloat(max(0, (h - startHour) * 60 + m))
-        return minsSinceStart * (hourHeight / 60.0)
+        let totalMinutes = CGFloat(h * 60 + m)
+        let dayMinutes: CGFloat = 24 * 60
+        return (totalMinutes / dayMinutes) * totalHeight
     }
     
-    private func pillH(for task: TaskItem) -> CGFloat {
-        let h = CGFloat(task.durationMinutes) * (hourHeight / 60.0)
+    /// Pill height proportional to task duration.
+    private func pillH(for task: TaskItem, totalHeight: CGFloat) -> CGFloat {
+        let dayMinutes: CGFloat = 24 * 60
+        let h = (CGFloat(task.durationMinutes) / dayMinutes) * totalHeight
         return max(miniPillSize, h)
     }
 }
