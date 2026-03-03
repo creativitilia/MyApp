@@ -10,6 +10,11 @@ struct TimelineView: View {
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
     let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
     let themePink = Color(red: 1.0, green: 0.54, blue: 0.54) // Coral pink
+    
+    // The X center of the vertical timeline line
+    private var lineX: CGFloat {
+        vm.timeColumnWidth + 10 + 22 - 0.75
+    }
 
     var body: some View {
         NavigationStack {
@@ -60,13 +65,25 @@ struct TimelineView: View {
                                 // A. Time Labels (Far left)
                                 TimeColumnView(vm: vm)
                                 
-                                // B. Continuous Vertical Line Background
+                                // B. Colored Vertical Timeline Line
+                                // Base: gray dashed line for the full 24 hours
                                 Path { path in
                                     path.move(to: CGPoint(x: 0, y: 0))
                                     path.addLine(to: CGPoint(x: 0, y: vm.timelineHeight()))
                                 }
                                 .stroke(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-                                .offset(x: vm.timeColumnWidth + 10 + 22 - 0.75)
+                                .offset(x: lineX)
+                                
+                                // Colored segments: each task paints its color over the line
+                                ForEach(vm.layoutAttributes, id: \.task.id) { layout in
+                                    Path { path in
+                                        path.move(to: CGPoint(x: 0, y: layout.yPos))
+                                        path.addLine(to: CGPoint(x: 0, y: layout.yPos + layout.height))
+                                    }
+                                    .stroke(layout.task.color, style: StrokeStyle(lineWidth: 2.5))
+                                    .offset(x: lineX)
+                                    .zIndex(-1) // Behind the pills
+                                }
                                 
                                 // C. Floating Current Time Label
                                 if vm.calendar.isDate(vm.selectedDate, inSameDayAs: Date()) {
@@ -78,20 +95,25 @@ struct TimelineView: View {
                                         .frame(width: vm.timeColumnWidth, alignment: .trailing)
                                         .offset(y: currentY - 7)
                                         .animation(.linear(duration: 1.0), value: currentY)
-                                        .zIndex(50) // Float above everything
+                                        .zIndex(50)
                                 }
                                 
                                 // D. Render Task Layouts (Overlap Engine)
                                 ForEach(vm.layoutAttributes, id: \.task.id) { layout in
                                     
-                                    // Overlap Warning Label
+                                    // Overlap Warning Label — styled like inspiration:
+                                    // "Tasks are " in gray + "overlapping" in coral pink
                                     if layout.showOverlapWarning {
-                                        Text("Tasks are overlapping")
-                                            .font(.caption.weight(.medium))
-                                            .foregroundColor(themePink)
-                                            .padding(.leading, vm.timeColumnWidth + 10 + 48 + 16)
-                                            .offset(y: layout.warningYPos)
-                                            .zIndex(100)
+                                        HStack(spacing: 0) {
+                                            Text("Tasks are ")
+                                                .foregroundColor(.gray)
+                                            Text("overlapping")
+                                                .foregroundColor(themePink)
+                                        }
+                                        .font(.caption.weight(.medium))
+                                        .padding(.leading, vm.timeColumnWidth + 10 + 48 + 16)
+                                        .offset(y: layout.warningYPos)
+                                        .zIndex(100)
                                     }
                                     
                                     // Task Pill
@@ -100,12 +122,13 @@ struct TimelineView: View {
                                         TaskBlockView(
                                             task: layout.task,
                                             height: layout.height,
+                                            isEyeOverlap: layout.isEyeOverlap,
                                             onTap: { editingTask = layout.task },
                                             onToggleComplete: { vm.toggleCompletion(for: layout.task) }
                                         )
                                     }
                                     .offset(y: layout.yPos)
-                                    .zIndex(layout.zIndex) // Forces earlier tasks to cutout later ones
+                                    .zIndex(layout.zIndex)
                                 }
                             }
                             .frame(height: vm.timelineHeight() + 100, alignment: .top)

@@ -10,6 +10,7 @@ struct TaskLayout {
     let zIndex: Double
     let showOverlapWarning: Bool
     let warningYPos: CGFloat
+    let isEyeOverlap: Bool      // NEW: true = "eye" junction effect, false = normal pill
 }
 
 final class DayScheduleViewModel: ObservableObject {
@@ -21,6 +22,7 @@ final class DayScheduleViewModel: ObservableObject {
     let pixelsPerMinute: CGFloat = 2.0
     let minuteSnap: Int = 5
     let timeColumnWidth: CGFloat = 65
+    let pillWidth: CGFloat = 48          // NEW: shared constant for the capsule width
 
     private let store: TaskStore
     let calendar = Calendar.current
@@ -51,15 +53,18 @@ final class DayScheduleViewModel: ObservableObject {
         var layouts = [TaskLayout]()
         let dayTasks = tasks.sorted { $0.startTime < $1.startTime }
         
-        var prevY: CGFloat = 0
-        var prevHeight: CGFloat = 0
-        var staggerCount = 0
+        // We track each layout's "effective bottom" for chaining overlaps
+        // effectiveBottom = yPos + height of the pill as drawn
+        var prevEffectiveY: CGFloat = 0
+        var prevEffectiveHeight: CGFloat = 0
         
         for (index, task) in dayTasks.enumerated() {
-            var y = yPosition(for: task.startTime)
+            let naturalY = yPosition(for: task.startTime)
             let h = height(for: task)
+            var y = naturalY
             var showWarning = false
             var warnY: CGFloat = 0
+            var isEye = false
             
             if index > 0 {
                 let prevTask = dayTasks[index - 1]
@@ -67,36 +72,66 @@ final class DayScheduleViewModel: ObservableObject {
                 
                 // Overlap detected!
                 if task.startTime < prevEnd {
+                    // Calculate how many minutes of overlap exist
+                    let overlapSeconds = prevEnd.timeIntervalSince(task.startTime)
+                    let overlapMinutes = overlapSeconds / 60.0
+                    
                     showWarning = true
                     
-                    // If they start at the exact same time, artificially push this one down to stack them
-                    if task.startTime == prevTask.startTime {
-                        staggerCount += 1
-                        y = prevY + 48 // Push down by pill height so titles don't collide
+                    if overlapMinutes >= 10 {
+                        // ── EYE EFFECT ──
+                        // Push the second pill so its top overlaps the first pill's bottom
+                        // by exactly the capsule's rounded-end diameter (pillWidth).
+                        // This creates the "vesica piscis" / eye cutout shape.
+                        isEye = true
+                        
+                        let prevBottom = prevEffectiveY + prevEffectiveHeight
+                        // The second pill's top should start pillWidth above the first pill's bottom
+                        y = prevBottom - pillWidth
+                        
+                        // Clamp: never push the pill higher than its natural position
+                        y = max(y, naturalY)
+                        
+                        // Warning label sits right at the junction center (the eye)
+                        warnY = y + (pillWidth / 2) - 8
                     } else {
-                        staggerCount = 0
+                        // ── MINOR OVERLAP (< 10 min) ──
+                        // Render as two normal separate pills at their natural Y positions.
+                        // No eye effect, just show the warning label between them.
+                        isEye = false
+                        y = naturalY
+                        
+                        let prevCenter = prevEffectiveY + (prevEffectiveHeight / 2)
+                        let currentCenter = y + (h / 2)
+                        warnY = ((prevCenter + currentCenter) / 2) - 8
                     }
-                    
-                    // Calculate perfectly centered Y for the "Tasks are overlapping" text
-                    let prevCenter = prevY + (prevHeight / 2)
-                    let currentCenter = y + (h / 2)
-                    warnY = ((prevCenter + currentCenter) / 2) - 8 // -8 to visually center the font height
-                } else {
-                    staggerCount = 0
                 }
+            }
+            
+            // Z-Index logic:
+            // - For eye overlaps: the SECOND (lower) pill must be ON TOP so its dark
+            //   stroke cuts into the first pill, creating the eye illusion.
+            //   We give the first pill a lower z-index, second pill a higher one.
+            // - For normal pills: earlier tasks get higher z-index (existing behavior).
+            let z: Double
+            if isEye {
+                z = Double(index) // Higher index = higher z = renders on top
+            } else {
+                z = Double(-index) // Lower index = higher z (original behavior)
             }
             
             layouts.append(TaskLayout(
                 task: task,
                 yPos: y,
                 height: h,
-                zIndex: Double(-index), // Earlier tasks get higher Z-Index to overlap later tasks
+                zIndex: z,
                 showOverlapWarning: showWarning,
-                warningYPos: warnY
+                warningYPos: warnY,
+                isEyeOverlap: isEye
             ))
             
-            prevY = y
-            prevHeight = h
+            prevEffectiveY = y
+            prevEffectiveHeight = h
         }
         return layouts
     }
@@ -127,7 +162,6 @@ final class DayScheduleViewModel: ObservableObject {
     
     private func sortAndPersist() {
         allTasks.sort(by: { $0.startTime < $1.startTime })
-        // FIX: Added the 'tasks:' argument label here
         store.save(tasks: allTasks)
     }
 
