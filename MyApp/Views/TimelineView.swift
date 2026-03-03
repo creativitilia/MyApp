@@ -113,7 +113,10 @@ struct WeekPageView: View {
     let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
     let themePink = Color(red: 1.0, green: 0.54, blue: 0.54)
     
-    private let pillCenterX: CGFloat = 32  // pill center = leading padding(8) + pillWidth(48)/2
+    // New pill width = 70, so pill center X = leading padding(16) + pillWidth(70)/2 = 51
+    private let pillWidth: CGFloat = 70
+    private let timeColumnWidth: CGFloat = 55
+    private let contentLeading: CGFloat = 16
     
     private var isRevealed: Bool { revealProgress > 0.5 }
     
@@ -224,9 +227,6 @@ struct WeekPageView: View {
     // MARK: - Day Timeline (Structured-Style)
     private var dayTimelineContent: some View {
         let sortedTasks = vm.tasks.sorted { $0.startTime < $1.startTime }
-        // The X position of the pill center relative to the leading edge of the content
-        // Content has .padding(.horizontal, 16), then pill is 48 wide, so center = 24
-        let lineX: CGFloat = 16 + 24  // = 40pt from leading edge of padded content
         
         return Group {
             if sortedTasks.isEmpty {
@@ -239,89 +239,111 @@ struct WeekPageView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 PageFriendlyScrollView {
-                    ZStack(alignment: .topLeading) {
-                        // ── The main VStack content ──
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(sortedTasks.enumerated()), id: \.element.id) { index, task in
-                                // ── TIME LABEL ──
-                                Text(vm.timeString(for: task.startTime))
-                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                    .foregroundColor(.gray.opacity(0.6))
-                                    .padding(.leading, 16)
-                                    .padding(.bottom, 2)
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(sortedTasks.enumerated()), id: \.element.id) { index, task in
+                            // ── TASK ROW: time labels on left, pill+text on right ──
+                            taskRow(task: task)
+                                .padding(.top, index == 0 ? 4 : 10)
+                            
+                            // ── BREAK between tasks ──
+                            if index < sortedTasks.count - 1 {
+                                let nextTask = sortedTasks[index + 1]
+                                let taskEnd = task.startTime.addingTimeInterval(task.duration)
+                                let gapMinutes = Int(nextTask.startTime.timeIntervalSince(taskEnd) / 60)
                                 
-                                // ── TASK BLOCK ──
-                                HStack(alignment: .top, spacing: 0) {
-                                    TaskBlockView(
-                                        task: task,
-                                        height: max(48, CGFloat(task.durationMinutes) * 1.2),
-                                        isEyeOverlap: false,
-                                        onTap: { editingTask = task },
-                                        onToggleComplete: { vm.toggleCompletion(for: task) }
+                                if gapMinutes > 0 {
+                                    breakSection(
+                                        fromTask: task,
+                                        toTask: nextTask,
+                                        endTime: taskEnd,
+                                        startTime: nextTask.startTime,
+                                        index: index
                                     )
                                 }
-                                .padding(.horizontal, 16)
-                                
-                                // ── BREAK between tasks ──
-                                if index < sortedTasks.count - 1 {
-                                    let nextTask = sortedTasks[index + 1]
-                                    let taskEnd = task.startTime.addingTimeInterval(task.duration)
-                                    let gapMinutes = Int(nextTask.startTime.timeIntervalSince(taskEnd) / 60)
-                                    
-                                    if gapMinutes > 0 {
-                                        // End time
-                                        Text(vm.timeString(for: taskEnd))
-                                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                            .foregroundColor(.gray.opacity(0.6))
-                                            .padding(.leading, 16)
-                                            .padding(.top, 4)
-                                        
-                                        // Break message — aligned with pill content area
-                                        HStack(spacing: 4) {
-                                            Text("💤")
-                                                .font(.caption)
-                                            Text(breakMessage(for: index))
-                                                .font(.caption)
-                                                .foregroundColor(.gray.opacity(0.5))
-                                                .italic()
-                                        }
-                                        .padding(.leading, 16 + 48 + 12) // pill width + spacing
-                                        .padding(.vertical, 8)
-                                    }
-                                }
                             }
-                            
-                            // ── FINAL END TIME ──
-                            if let last = sortedTasks.last {
-                                Text(vm.timeString(for: last.startTime.addingTimeInterval(last.duration)))
-                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                    .foregroundColor(.gray.opacity(0.6))
-                                    .padding(.leading, 16)
-                                    .padding(.top, 4)
-                            }
-                            
-                            Spacer(minLength: 100)
                         }
-                        .padding(.top, 12)
-                        .padding(.bottom, 40)
                         
-                        // ── DASHED VERTICAL LINE through the pill centers ──
-                        // This runs behind everything, aligned to pill center X
-                        GeometryReader { geo in
-                            Path { p in
-                                p.move(to: CGPoint(x: lineX, y: 0))
-                                p.addLine(to: CGPoint(x: lineX, y: geo.size.height))
-                            }
-                            .stroke(
-                                Color.gray.opacity(0.25),
-                                style: StrokeStyle(lineWidth: 2.5, dash: [5, 5])
-                            )
-                        }
-                        .allowsHitTesting(false)
+                        Spacer(minLength: 100)
                     }
+                    .padding(.top, 12)
+                    .padding(.bottom, 40)
                 }
             }
         }
+    }
+    
+    // MARK: - Task Row (time column + pill + text)
+    private func taskRow(task: TaskItem) -> some View {
+        let taskPillHeight = max(pillWidth, CGFloat(task.durationMinutes) * 1.5)
+        let endTime = task.startTime.addingTimeInterval(task.duration)
+        
+        return HStack(alignment: .top, spacing: 0) {
+            // Left time column — start time at top, end time at bottom
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(vm.timeString(for: task.startTime))
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.6))
+                
+                Spacer(minLength: 0)
+                
+                Text(vm.timeString(for: endTime))
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.6))
+            }
+            .frame(width: timeColumnWidth, height: taskPillHeight)
+            .padding(.leading, 8)
+            
+            // Pill + text + checkbox
+            TaskBlockView(
+                task: task,
+                height: taskPillHeight,
+                isEyeOverlap: false,
+                onTap: { editingTask = task },
+                onToggleComplete: { vm.toggleCompletion(for: task) }
+            )
+            .padding(.trailing, 16)
+        }
+    }
+    
+    // MARK: - Break Section (gradient dashed line + message)
+    private func breakSection(fromTask: TaskItem, toTask: TaskItem, endTime: Date, startTime: Date, index: Int) -> some View {
+        let lineX = 8 + timeColumnWidth + pillWidth / 2  // align with pill center
+        
+        return VStack(spacing: 0) {
+            // Gradient dashed line between tasks
+            ZStack(alignment: .leading) {
+                // The dashed gradient line
+                HStack(spacing: 0) {
+                    Spacer()
+                        .frame(width: lineX - 1.5)
+                    
+                    DashedGradientLine(
+                        fromColor: fromTask.color,
+                        toColor: toTask.color
+                    )
+                    .frame(width: 3, height: 40)
+                    
+                    Spacer()
+                }
+                
+                // Break message next to the line
+                HStack(spacing: 6) {
+                    Spacer()
+                        .frame(width: lineX + 14)
+                    
+                    Image(systemName: "zzz")
+                        .font(.caption2)
+                        .foregroundColor(.gray.opacity(0.5))
+                    
+                    Text(breakMessage(for: index))
+                        .font(.caption)
+                        .foregroundColor(.gray.opacity(0.5))
+                        .italic()
+                }
+            }
+            .frame(height: 40)
+        }
+        .padding(.vertical, 4)
     }
     
     private func breakMessage(for index: Int) -> String {
@@ -386,8 +408,8 @@ struct WeekPageView: View {
                 
                 Button(action: { vm.toggleCompletion(for: task) }) {
                     Circle()
-                        .strokeBorder(task.color.opacity(0.5), lineWidth: 2)
-                        .frame(width: 28, height: 28)
+                        .strokeBorder(task.color, lineWidth: 2.5)
+                        .frame(width: 32, height: 32)
                 }
             }
             .padding(.horizontal, 20).padding(.vertical, 16)
@@ -399,5 +421,67 @@ struct WeekPageView: View {
         }
         
         Spacer(minLength: 0)
+    }
+}
+
+
+// MARK: - Dashed Gradient Line Shape
+struct DashedGradientLine: View {
+    let fromColor: Color
+    let toColor: Color
+    
+    var body: some View {
+        GeometryReader { geo in
+            let h = geo.size.height
+            let dashHeight: CGFloat = 6
+            let gapHeight: CGFloat = 5
+            let step = dashHeight + gapHeight
+            let count = Int(h / step) + 1
+            
+            Canvas { context, size in
+                for i in 0..<count {
+                    let y = CGFloat(i) * step
+                    if y + dashHeight > h { break }
+                    
+                    let progress = h > 0 ? y / h : 0
+                    let rect = CGRect(
+                        x: (size.width - 3) / 2,
+                        y: y,
+                        width: 3,
+                        height: min(dashHeight, h - y)
+                    )
+                    
+                    let blendedColor = blendColor(from: fromColor, to: toColor, progress: progress)
+                    context.fill(
+                        Path(roundedRect: rect, cornerRadius: 1.5),
+                        with: .color(blendedColor)
+                    )
+                }
+            }
+        }
+    }
+    
+    private func blendColor(from: Color, to: Color, progress: CGFloat) -> Color {
+        // Simple linear interpolation via opacity layering
+        let p = min(1, max(0, progress))
+        return Color(
+            red: lerp(from: from.components.red, to: to.components.red, t: p),
+            green: lerp(from: from.components.green, to: to.components.green, t: p),
+            blue: lerp(from: from.components.blue, to: to.components.blue, t: p)
+        )
+    }
+    
+    private func lerp(from: Double, to: Double, t: Double) -> Double {
+        from + (to - from) * t
+    }
+}
+
+// Helper to extract Color components
+extension Color {
+    var components: (red: Double, green: Double, blue: Double, alpha: Double) {
+        let uiColor = UIColor(self)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return (Double(r), Double(g), Double(b), Double(a))
     }
 }

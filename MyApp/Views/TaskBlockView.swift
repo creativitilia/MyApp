@@ -7,7 +7,7 @@ struct TaskBlockView: View {
     let onTap: () -> Void
     let onToggleComplete: () -> Void
     
-    let pillWidth: CGFloat = 48
+    let pillWidth: CGFloat = 70
     let darkBackground = Color(red: 0.1, green: 0.1, blue: 0.12)
     
     private var strokeWidth: CGFloat {
@@ -18,12 +18,8 @@ struct TaskBlockView: View {
         max(height, pillWidth)
     }
     
-    private var pillCenterY: CGFloat {
-        pillHeight / 2
-    }
-    
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 16) {
             
             // 1. The Pill
             ZStack(alignment: .center) {
@@ -32,7 +28,7 @@ struct TaskBlockView: View {
                     .frame(width: pillWidth, height: pillHeight)
                 
                 Image(systemName: task.isCompleted ? "checkmark" : (task.icon ?? "doc.text.fill"))
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 28, weight: .bold))
                     .foregroundColor(task.isCompleted ? task.color : .white)
             }
             .overlay(
@@ -46,8 +42,8 @@ struct TaskBlockView: View {
             )
             .frame(width: pillWidth, height: pillHeight)
             
-            // 2. Text
-            VStack(alignment: .leading, spacing: 3) {
+            // 2. Text — vertically centered with the pill
+            VStack(alignment: .leading, spacing: 4) {
                 let endTime = task.startTime.addingTimeInterval(task.duration)
                 let durText: String = {
                     let mins = Int(task.durationMinutes)
@@ -59,38 +55,35 @@ struct TaskBlockView: View {
                     return "\(mins) min"
                 }()
                 Text("\(task.startTime.formatted(date: .omitted, time: .shortened)) – \(endTime.formatted(date: .omitted, time: .shortened)) (\(durText))")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundColor(.gray)
                 
                 Text(task.title)
-                    .font(.headline)
+                    .font(.title3)
                     .fontWeight(.bold)
                     .foregroundColor(task.isCompleted ? .gray : .primary)
                     .strikethrough(task.isCompleted)
                     .lineLimit(1)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .offset(y: pillCenterY - 19)
             
             Spacer(minLength: 0)
             
-            // 3. Checkbox
+            // 3. Checkbox — larger, full task color
             Button(action: onToggleComplete) {
                 Circle()
-                    .strokeBorder(task.isCompleted ? task.color : task.color.opacity(0.5), lineWidth: 2)
+                    .strokeBorder(task.isCompleted ? task.color : task.color, lineWidth: 2.5)
                     .background(Circle().fill(task.isCompleted ? task.color : Color.clear))
-                    .frame(width: 26, height: 26)
+                    .frame(width: 32, height: 32)
                     .overlay(
                         Image(systemName: "checkmark")
-                            .font(.caption.weight(.bold))
+                            .font(.subheadline.weight(.bold))
                             .foregroundColor(.white)
                             .opacity(task.isCompleted ? 1 : 0)
                     )
             }
-            .padding(.trailing, 16)
-            .offset(y: pillCenterY - 13)
         }
-        .frame(height: pillHeight, alignment: .top)
+        .frame(height: pillHeight, alignment: .center)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
     }
