@@ -20,23 +20,18 @@ struct TimelineView: View {
     
     private var isRevealed: Bool { revealProgress > 0.5 }
     
-    /// The 7 dates visible in the calendar strip, respecting the device locale's firstWeekday.
-    /// This ensures column 0 = leftmost day in the strip, column 6 = rightmost.
+    /// The 7 dates of the current week — SAME logic as HorizontalCalendarView.
+    /// This guarantees column N in WeekOverviewView = date N in the calendar strip.
     private var weekDates: [Date] {
         let cal = vm.calendar
         let selected = cal.startOfDay(for: vm.selectedDate)
-        
-        // Find what weekday selectedDate is (1=Sun, 2=Mon, ..., 7=Sat)
         let selectedWeekday = cal.component(.weekday, from: selected)
-        let firstWeekday = cal.firstWeekday // Respects locale (e.g. 7=Sat, 2=Mon, 1=Sun)
+        let firstWeekday = cal.firstWeekday
         
-        // How many days back from selected to reach the start of this week
         var diff = selectedWeekday - firstWeekday
         if diff < 0 { diff += 7 }
         
-        // The first day of this week
         guard let weekStart = cal.date(byAdding: .day, value: -diff, to: selected) else { return [] }
-        
         return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: weekStart) }
     }
 
@@ -44,11 +39,10 @@ struct TimelineView: View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
                 
-                // ── MAIN LAYOUT ──
                 VStack(spacing: 0) {
                     
                     // ═══════════════════════════════════
-                    // SHARED HEADER — pinned at top
+                    // SHARED HEADER
                     // ═══════════════════════════════════
                     HStack(alignment: .bottom, spacing: 6) {
                         if isRevealed {
@@ -80,7 +74,7 @@ struct TimelineView: View {
                     .animation(.easeInOut(duration: 0.25), value: isRevealed)
                     
                     // ═══════════════════════════════════
-                    // SHARED CALENDAR STRIP — pinned
+                    // FIXED 7-DAY CALENDAR STRIP
                     // ═══════════════════════════════════
                     HorizontalCalendarView(selectedDate: $vm.selectedDate, vm: vm)
                         .padding(.bottom, 10)
@@ -101,7 +95,7 @@ struct TimelineView: View {
                                 .opacity(revealProgress > 0.05 ? 1 : 0)
                                 .animation(.easeOut(duration: 0.15), value: revealProgress > 0.05)
                             
-                            // ── FRONT CARD (draggable, collapses to pill) ──
+                            // ── FRONT CARD ──
                             VStack(spacing: 0) {
                                 Capsule()
                                     .fill(Color.gray.opacity(0.5))
@@ -129,12 +123,7 @@ struct TimelineView: View {
                                 DragGesture(minimumDistance: 8)
                                     .onChanged { value in
                                         let delta = value.translation.height
-                                        let newProgress: CGFloat
-                                        if delta > 0 {
-                                            newProgress = revealProgress + delta / maxOffset
-                                        } else {
-                                            newProgress = revealProgress + delta / maxOffset
-                                        }
+                                        let newProgress = revealProgress + delta / maxOffset
                                         revealProgress = min(1, max(0, newProgress))
                                     }
                                     .onEnded { value in
@@ -156,7 +145,7 @@ struct TimelineView: View {
                 .background(darkerBackground.ignoresSafeArea())
                 
                 // ═══════════════════════════════════
-                // "+" BUTTON — always visible
+                // "+" BUTTON
                 // ═══════════════════════════════════
                 Button(action: { showingAdd = true }) {
                     Image(systemName: "plus")
@@ -181,7 +170,7 @@ struct TimelineView: View {
         }
     }
     
-    // MARK: - Day Timeline (full front card content)
+    // MARK: - Day Timeline
     private var dayTimelineContent: some View {
         ScrollViewReader { scrollProxy in
             ScrollView(.vertical, showsIndicators: false) {
@@ -260,7 +249,7 @@ struct TimelineView: View {
         }
     }
     
-    // MARK: - Collapsed Task Pill (front card when fully revealed)
+    // MARK: - Collapsed Task Pill
     @ViewBuilder
     private var collapsedTaskPill: some View {
         let now = Date()
