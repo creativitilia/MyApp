@@ -11,7 +11,6 @@ struct TimelineView: View {
     let darkerBackground = Color(red: 0.05, green: 0.05, blue: 0.06)
     let themePink = Color(red: 1.0, green: 0.54, blue: 0.54) // Coral pink
     
-    // The X center of the vertical timeline line
     private var lineX: CGFloat {
         vm.timeColumnWidth + 10 + 22 - 0.75
     }
@@ -66,7 +65,6 @@ struct TimelineView: View {
                                 TimeColumnView(vm: vm)
                                 
                                 // B. Colored Vertical Timeline Line
-                                // Base: gray dashed line for the full 24 hours
                                 Path { path in
                                     path.move(to: CGPoint(x: 0, y: 0))
                                     path.addLine(to: CGPoint(x: 0, y: vm.timelineHeight()))
@@ -82,7 +80,7 @@ struct TimelineView: View {
                                     }
                                     .stroke(layout.task.color, style: StrokeStyle(lineWidth: 2.5))
                                     .offset(x: lineX)
-                                    .zIndex(-1) // Behind the pills
+                                    .zIndex(-1)
                                 }
                                 
                                 // C. Floating Current Time Label
@@ -101,8 +99,7 @@ struct TimelineView: View {
                                 // D. Render Task Layouts (Overlap Engine)
                                 ForEach(vm.layoutAttributes, id: \.task.id) { layout in
                                     
-                                    // Overlap Warning Label — styled like inspiration:
-                                    // "Tasks are " in gray + "overlapping" in coral pink
+                                    // Overlap Warning Label
                                     if layout.showOverlapWarning {
                                         HStack(spacing: 0) {
                                             Text("Tasks are ")
@@ -111,8 +108,9 @@ struct TimelineView: View {
                                                 .foregroundColor(themePink)
                                         }
                                         .font(.caption.weight(.medium))
-                                        .padding(.leading, vm.timeColumnWidth + 10 + 48 + 16)
-                                        .offset(y: layout.warningYPos)
+                                        // Position: to the right of the pill column
+                                        .offset(x: vm.timeColumnWidth + 10 + vm.pillWidth + 16,
+                                                y: layout.warningYPos)
                                         .zIndex(100)
                                     }
                                     

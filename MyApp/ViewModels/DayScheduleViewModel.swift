@@ -5,12 +5,13 @@ import Combine
 // Determines exactly where and how a task should be drawn
 struct TaskLayout {
     let task: TaskItem
-    let yPos: CGFloat
-    let height: CGFloat
+    let yPos: CGFloat           // Top edge of where this task row starts
+    let height: CGFloat         // The capsule pill height (visual)
+    let displayHeight: CGFloat  // The full row height (pill + text breathing room)
     let zIndex: Double
     let showOverlapWarning: Bool
     let warningYPos: CGFloat
-    let isEyeOverlap: Bool      // NEW: true = "eye" junction effect, false = normal pill
+    let isEyeOverlap: Bool
 }
 
 final class DayScheduleViewModel: ObservableObject {
@@ -22,7 +23,7 @@ final class DayScheduleViewModel: ObservableObject {
     let pixelsPerMinute: CGFloat = 2.0
     let minuteSnap: Int = 5
     let timeColumnWidth: CGFloat = 65
-    let pillWidth: CGFloat = 48          // NEW: shared constant for the capsule width
+    let pillWidth: CGFloat = 48
 
     private let store: TaskStore
     let calendar = Calendar.current
@@ -53,8 +54,6 @@ final class DayScheduleViewModel: ObservableObject {
         var layouts = [TaskLayout]()
         let dayTasks = tasks.sorted { $0.startTime < $1.startTime }
         
-        // We track each layout's "effective bottom" for chaining overlaps
-        // effectiveBottom = yPos + height of the pill as drawn
         var prevEffectiveY: CGFloat = 0
         var prevEffectiveHeight: CGFloat = 0
         
@@ -70,9 +69,7 @@ final class DayScheduleViewModel: ObservableObject {
                 let prevTask = dayTasks[index - 1]
                 let prevEnd = prevTask.startTime.addingTimeInterval(prevTask.duration)
                 
-                // Overlap detected!
                 if task.startTime < prevEnd {
-                    // Calculate how many minutes of overlap exist
                     let overlapSeconds = prevEnd.timeIntervalSince(task.startTime)
                     let overlapMinutes = overlapSeconds / 60.0
                     
@@ -80,24 +77,16 @@ final class DayScheduleViewModel: ObservableObject {
                     
                     if overlapMinutes >= 10 {
                         // ── EYE EFFECT ──
-                        // Push the second pill so its top overlaps the first pill's bottom
-                        // by exactly the capsule's rounded-end diameter (pillWidth).
-                        // This creates the "vesica piscis" / eye cutout shape.
                         isEye = true
                         
                         let prevBottom = prevEffectiveY + prevEffectiveHeight
-                        // The second pill's top should start pillWidth above the first pill's bottom
                         y = prevBottom - pillWidth
-                        
-                        // Clamp: never push the pill higher than its natural position
                         y = max(y, naturalY)
                         
-                        // Warning label sits right at the junction center (the eye)
+                        // Warning Y: place it at the eye junction center
                         warnY = y + (pillWidth / 2) - 8
                     } else {
-                        // ── MINOR OVERLAP (< 10 min) ──
-                        // Render as two normal separate pills at their natural Y positions.
-                        // No eye effect, just show the warning label between them.
+                        // ── MINOR OVERLAP (<10 min) ──
                         isEye = false
                         y = naturalY
                         
@@ -108,22 +97,23 @@ final class DayScheduleViewModel: ObservableObject {
                 }
             }
             
-            // Z-Index logic:
-            // - For eye overlaps: the SECOND (lower) pill must be ON TOP so its dark
-            //   stroke cuts into the first pill, creating the eye illusion.
-            //   We give the first pill a lower z-index, second pill a higher one.
-            // - For normal pills: earlier tasks get higher z-index (existing behavior).
             let z: Double
             if isEye {
-                z = Double(index) // Higher index = higher z = renders on top
+                z = Double(index)
             } else {
-                z = Double(-index) // Lower index = higher z (original behavior)
+                z = Double(-index)
             }
+            
+            // Display height: the visual row height.
+            // For the pill itself h may be small, but the text needs space.
+            // We use the pill height (h) as-is — the text alignment fix is in the View.
+            let displayH = h
             
             layouts.append(TaskLayout(
                 task: task,
                 yPos: y,
                 height: h,
+                displayHeight: displayH,
                 zIndex: z,
                 showOverlapWarning: showWarning,
                 warningYPos: warnY,
